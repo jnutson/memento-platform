@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
@@ -170,6 +170,50 @@ def _load_queue(store: PredictionStore) -> tuple[dict[str, object], list[dict[st
     return manifest, predictions, identities
 
 
+def _validate_queue_release(
+    manifest: dict[str, object], predictions: list[dict[str, object]]
+) -> None:
+    display_count = int(manifest["display_count"])
+    candidate_count = int(manifest["candidate_count"])
+    ranks = [int(row["rank_position"]) for row in predictions]
+    identities = [str(row["prediction_id"]) for row in predictions]
+    if display_count != len(predictions) or candidate_count < display_count:
+        raise ValueError("prediction display count mismatch")
+    if ranks != list(range(1, len(predictions) + 1)):
+        raise ValueError("prediction ranks must be unique and contiguous")
+    if len(identities) != len(set(identities)):
+        raise ValueError("prediction identities must be unique")
+
+
+def _validated_evidence(
+    prediction: dict[str, object], evidence: list[EvidenceRow]
+) -> dict[str, list[EvidenceRow]]:
+    prediction_id = str(prediction["prediction_id"])
+    prediction_date = prediction["prediction_date"]
+    if not isinstance(prediction_date, date):
+        raise ValueError("prediction date is invalid")
+    expected_dates = {
+        prediction_date + timedelta(days=offset) for offset in range(1, 29)
+    }
+    paths: dict[str, list[EvidenceRow]] = {}
+    for path in ("low", "base", "high"):
+        rows = sorted(
+            (row for row in evidence if row.path == path),
+            key=lambda row: row.projection_date,
+        )
+        dates = {row.projection_date for row in rows}
+        if (
+            len(rows) != 28
+            or dates != expected_dates
+            or any(row.prediction_id != prediction_id for row in rows)
+        ):
+            raise ValueError("prediction evidence must contain three complete 28-day paths")
+        paths[path] = rows
+    if len(evidence) != 84:
+        raise ValueError("prediction evidence must contain three complete 28-day paths")
+    return paths
+
+
 def create_app(data_root: Path) -> FastAPI:
     root = data_root.resolve()
     app = FastAPI(title="Memento Attention API", version=API_CONTRACT_VERSION)
@@ -205,8 +249,7 @@ def create_app(data_root: Path) -> FastAPI:
     def attention_queue() -> AttentionQueueResponse:
         try:
             manifest, predictions, identities = _load_queue(prediction_store())
-            if int(manifest["display_count"]) != len(predictions):
-                raise ValueError("prediction display count mismatch")
+            _validate_queue_release(manifest, predictions)
             queue = [_queue_prediction(row, identities[str(row["prediction_id"])]) for row in predictions]
             lost_units = sum((Decimal(str(row["estimated_lost_units"])) for row in predictions), Decimal("0"))
             lost_sales = sum((Decimal(str(row["estimated_lost_sales_amount"])) for row in predictions), Decimal("0"))
@@ -237,9 +280,7 @@ def create_app(data_root: Path) -> FastAPI:
             identity = store.display_identity(prediction)
             raw_evidence = store.evidence(prediction_id)
             evidence = [EvidenceRow.model_validate(row) for row in raw_evidence]
-            base_rows = [row for row in evidence if row.path == "base"]
-            if len(base_rows) != 28 or len(evidence) != 84:
-                raise ValueError("prediction evidence must contain three complete 28-day paths")
+            base_rows = _validated_evidence(prediction, evidence)["base"]
             schedule = [
                 ScheduledInbound(
                     expected_store_receipt_date=row.projection_date,

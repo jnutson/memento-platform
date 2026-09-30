@@ -43,9 +43,9 @@ export default function AttentionView() {
     return () => controller.abort();
   }, [selectedId]);
 
-  const select = useCallback((id: string | null) => {
+  const select = useCallback((id: string | null, preservePlanning = false) => {
     setSelectedId(id);
-    setPlanningOpen(false);
+    if (!preservePlanning) setPlanningOpen(false);
     setDetail(null);
     setDetailError(null);
     setDetailLoading(id !== null);
@@ -55,8 +55,8 @@ export default function AttentionView() {
     if (!predictions.length) return;
     const index = predictions.findIndex((prediction) => prediction.prediction_id === selectedId);
     const next = index < 0 ? (direction > 0 ? 0 : predictions.length - 1) : (index + direction + predictions.length) % predictions.length;
-    select(predictions[next].prediction_id);
-  }, [queue, select, selectedId]);
+    select(predictions[next].prediction_id, planningOpen);
+  }, [planningOpen, queue, select, selectedId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

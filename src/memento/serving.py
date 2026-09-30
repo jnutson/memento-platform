@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path, PurePosixPath
 
 import duckdb
 
 from .manifest import sha256_file
+
+
+PREDICTION_ID = re.compile(r"^oos_[0-9a-f]{64}$")
 
 
 class PredictionStore:
@@ -111,7 +115,7 @@ class PredictionStore:
 
     @staticmethod
     def _validate_prediction_id(prediction_id: str) -> None:
-        if not prediction_id.startswith("oos_") or len(prediction_id) != 68:
+        if not PREDICTION_ID.fullmatch(prediction_id):
             raise ValueError("invalid prediction identity")
 
     def evidence(self, prediction_id: str) -> list[dict[str, object]]:
