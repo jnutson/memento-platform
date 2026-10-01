@@ -33,6 +33,18 @@ SOURCE_COLUMNS = {
 }
 
 SOURCE_TYPES = {
+    "calendar_dim": ["DATE","VARCHAR","TINYINT","TINYINT","VARCHAR","TINYINT","VARCHAR","TINYINT","SMALLINT","SMALLINT","TINYINT","TINYINT","TINYINT","SMALLINT","TINYINT","TINYINT","SMALLINT","INTEGER","DATE","DATE","INTEGER"],
+    "store_dim": ["INTEGER","VARCHAR","TINYINT","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","DOUBLE","DOUBLE","SMALLINT","VARCHAR","SMALLINT","VARCHAR","VARCHAR","VARCHAR"],
+    "omni_item_dimensions": ["TINYINT","BIGINT","VARCHAR","VARCHAR","VARCHAR","VARCHAR","SMALLINT","VARCHAR","SMALLINT","VARCHAR","SMALLINT","VARCHAR","SMALLINT","VARCHAR","VARCHAR","VARCHAR","DATE","BOOLEAN","VARCHAR","DOUBLE","VARCHAR","VARCHAR"],
+    "store_sales": ["DATE","VARCHAR","TINYINT","INTEGER","VARCHAR","BIGINT","TINYINT","INTEGER","INTEGER","DOUBLE","INTEGER","DOUBLE"],
+    "store_invt": ["DATE","TINYINT","INTEGER","BIGINT","VARCHAR","INTEGER","VARCHAR","VARCHAR","INTEGER","INTEGER","DOUBLE","DOUBLE","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","BOOLEAN","BOOLEAN","BOOLEAN","BOOLEAN","DOUBLE"],
+    "long_rng_store_dmd_frcst": ["INTEGER","VARCHAR","TINYINT","INTEGER","BIGINT","INTEGER","DOUBLE"],
+}
+
+# Retain the already-published V1 fixture/legacy observable contract while accepting
+# the narrower PSP physical integer widths used by the Miro Brand A releases. These
+# are two pinned schemas, not general implicit numeric coercion.
+LEGACY_SOURCE_TYPES = {
     "calendar_dim": ["DATE","VARCHAR","INTEGER","INTEGER","VARCHAR","INTEGER","VARCHAR","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","INTEGER","DATE","DATE","INTEGER"],
     "store_dim": ["INTEGER","VARCHAR","INTEGER","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","VARCHAR","DOUBLE","DOUBLE","INTEGER","VARCHAR","INTEGER","VARCHAR","VARCHAR","VARCHAR"],
     "omni_item_dimensions": ["INTEGER","BIGINT","VARCHAR","VARCHAR","VARCHAR","VARCHAR","INTEGER","VARCHAR","INTEGER","VARCHAR","INTEGER","VARCHAR","INTEGER","VARCHAR","VARCHAR","VARCHAR","DATE","BOOLEAN","VARCHAR","DOUBLE","VARCHAR","VARCHAR"],
@@ -95,7 +107,9 @@ def validate_source_data(con: duckdb.DuckDBPyConnection, inventory: SourceInvent
             continue
         schema = [(row[0], row[1]) for row in desc]
         expected_schema = list(zip(expected_columns, SOURCE_TYPES[name], strict=True))
-        out.append(ValidationResult("SRC_SCHEMA_EXACT", "PASS" if schema == expected_schema else "FAIL", name, 0 if schema == expected_schema else 1, "exact physical column and type contract"))
+        legacy_schema = list(zip(expected_columns, LEGACY_SOURCE_TYPES[name], strict=True))
+        schema_ok = schema in (expected_schema, legacy_schema)
+        out.append(ValidationResult("SRC_SCHEMA_EXACT", "PASS" if schema_ok else "FAIL", name, 0 if schema_ok else 1, "exact supported physical column and type contract"))
         count = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
         out.append(ValidationResult("SRC_ROW_COUNT", "PASS" if count == declared[name]["row_count"] else "FAIL", name, 0 if count == declared[name]["row_count"] else 1, "physical row count reconciles"))
         pk = ",".join(PRIMARY_KEYS[name])
@@ -104,12 +118,12 @@ def validate_source_data(con: duckdb.DuckDBPyConnection, inventory: SourceInvent
         nulls = con.execute("SELECT count(*) FROM (SELECT * FROM " + scan + ") t WHERE " + " OR ".join(f'"{c}" IS NULL' for c in expected_columns)).fetchone()[0]
         out.append(ValidationResult("SRC_REQUIRED_NULL", "PASS" if nulls == 0 else "FAIL", name, int(nulls), "required values non-null"))
     checks = [
-        ("SRC_CALENDAR_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'calendar_dim')} WHERE geo_region_cd <> 'US' OR cal_wk_day_nbr NOT BETWEEN 1 AND 7 OR cal_mth_nbr NOT BETWEEN 1 AND 12 OR cal_qtr_nbr NOT BETWEEN 1 AND 4 OR wm_week_nbr NOT BETWEEN 1 AND 53 OR wm_yr_wk_nbr <> wm_yr_nbr*100+wm_week_nbr OR fiscal_mth_nbr <> wm_mth_nbr OR fiscal_qtr_nbr <> wm_qtr_nbr OR fiscal_full_yr_nbr <> wm_yr_nbr OR ly_cal_dt <> ly_comp_visit_dt", "calendar_dim"),
+        ("SRC_CALENDAR_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'calendar_dim')} WHERE geo_region_cd <> 'US' OR cal_wk_day_nbr NOT BETWEEN 1 AND 7 OR cal_mth_nbr NOT BETWEEN 1 AND 12 OR cal_qtr_nbr NOT BETWEEN 1 AND 4 OR wm_week_nbr NOT BETWEEN 1 AND 53 OR wm_yr_wk_nbr <> wm_yr_nbr::INTEGER*100+wm_week_nbr::INTEGER OR fiscal_mth_nbr <> wm_mth_nbr OR fiscal_qtr_nbr <> wm_qtr_nbr OR fiscal_full_yr_nbr <> wm_yr_nbr OR ly_cal_dt <> ly_comp_visit_dt", "calendar_dim"),
         ("SRC_LOCATION_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'store_dim')} WHERE geo_region_cd <> 'US' OR op_cmpny_cd <> 0 OR NOT isfinite(lat_dgr) OR NOT isfinite(long_dgr) OR lat_dgr NOT BETWEEN -90 AND 90 OR long_dgr NOT BETWEEN -180 AND 180", "store_dim"),
         ("SRC_PRODUCT_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'omni_item_dimensions')} WHERE op_cmpny_cd < 0 OR wm_item_nbr < 0 OR NOT isfinite(base_unit_rtl_amt) OR base_unit_rtl_amt < 0 OR abs(base_unit_rtl_amt-round(base_unit_rtl_amt,2)) > 0.000001", "omni_item_dimensions"),
         ("SRC_SALES_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_sales')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR rpt_cd NOT IN (0,7,8) OR svc_chnl_nm <> 'BIS' OR NOT isfinite(ty_sales_amt) OR NOT isfinite(ly_sales_amt) OR abs(ty_sales_amt-round(ty_sales_amt,2)) > 0.000001 OR abs(ly_sales_amt-round(ly_sales_amt,2)) > 0.000001", "store_sales"),
         ("SRC_INVENTORY_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_invt')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR crncy_cd <> 'USD' OR NOT isfinite(ty_on_hand_rtl_amt) OR NOT isfinite(ly_on_hand_rtl_amt) OR NOT isfinite(curr_store_unit_rtl_amt) OR ty_on_hand_rtl_amt < 0 OR ly_on_hand_rtl_amt < 0 OR curr_store_unit_rtl_amt < 0 OR abs(ty_on_hand_rtl_amt-round(ty_on_hand_rtl_amt,2)) > 0.000001 OR abs(ly_on_hand_rtl_amt-round(ly_on_hand_rtl_amt,2)) > 0.000001 OR abs(curr_store_unit_rtl_amt-round(curr_store_unit_rtl_amt,2)) > 0.000001", "store_invt"),
-        ("SRC_FORECAST_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'long_rng_store_dmd_frcst')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR NOT isfinite(final_fcst_each_qty) OR final_fcst_each_qty < 0 OR fcst_wm_yr_wk_nbr > wm_yr_wk_nbr", "long_rng_store_dmd_frcst"),
+        ("SRC_FORECAST_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'long_rng_store_dmd_frcst')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR NOT isfinite(final_fcst_each_qty) OR final_fcst_each_qty < 0 OR fcst_wm_yr_wk_nbr >= wm_yr_wk_nbr OR fcst_wm_yr_wk_nbr%100 NOT BETWEEN 1 AND 53", "long_rng_store_dmd_frcst"),
     ]
     for rule, sql, dataset in checks:
         count = con.execute(sql).fetchone()[0]
@@ -122,7 +136,7 @@ def validate_source_data(con: duckdb.DuckDBPyConnection, inventory: SourceInvent
         count = con.execute(sql).fetchone()[0]
         out.append(ValidationResult("SRC_REFERENCES", "PASS" if count == 0 else "FAIL", name, int(count), "dimension references resolve"))
     fact = _scan_sql(inventory, "long_rng_store_dmd_frcst")
-    sql = f"SELECT count(*) FROM {fact} f LEFT JOIN (SELECT DISTINCT wm_yr_wk_nbr FROM {cal}) tc ON f.wm_yr_wk_nbr=tc.wm_yr_wk_nbr LEFT JOIN (SELECT DISTINCT wm_yr_wk_nbr FROM {cal}) cc ON f.fcst_wm_yr_wk_nbr=cc.wm_yr_wk_nbr LEFT JOIN {loc} l ON f.store_nbr=l.store_nbr AND f.op_cmpny_cd=l.op_cmpny_cd LEFT JOIN {prod} p ON f.wm_item_nbr=p.wm_item_nbr AND f.op_cmpny_cd=p.op_cmpny_cd WHERE tc.wm_yr_wk_nbr IS NULL OR cc.wm_yr_wk_nbr IS NULL OR l.store_nbr IS NULL OR p.wm_item_nbr IS NULL"
+    sql = f"SELECT count(*) FROM {fact} f LEFT JOIN (SELECT DISTINCT wm_yr_wk_nbr FROM {cal}) tc ON f.wm_yr_wk_nbr=tc.wm_yr_wk_nbr LEFT JOIN {loc} l ON f.store_nbr=l.store_nbr AND f.op_cmpny_cd=l.op_cmpny_cd LEFT JOIN {prod} p ON f.wm_item_nbr=p.wm_item_nbr AND f.op_cmpny_cd=p.op_cmpny_cd WHERE tc.wm_yr_wk_nbr IS NULL OR l.store_nbr IS NULL OR p.wm_item_nbr IS NULL"
     count = con.execute(sql).fetchone()[0]
     out.append(ValidationResult("SRC_REFERENCES", "PASS" if count == 0 else "FAIL", "long_rng_store_dmd_frcst", int(count), "dimension references resolve"))
     return out

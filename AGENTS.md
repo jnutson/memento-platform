@@ -14,6 +14,13 @@ build the ingestion pipeline until a task explicitly asks for it.
 
 ## Operating rules
 
+- Treat `/Users/mininutson/Desktop/Synthetic Data` as strictly read-only from this
+  repository. Never edit its code, tests, configuration, manifests, generated data,
+  dependency files, or patched copies, including for cross-repository compatibility
+  checks or temporary workarounds. Inspect it only. If work would require a Synthetic
+  Data change, report the required change and stop; do not implement it. That
+  repository's `AGENTS.md` is the sole exception when the user explicitly asks to
+  update agent rules.
 - Optimize for an MVP and short learning loops; avoid speculative platforms and abstractions.
 - Keep validation, canonicalization, and metric logic deterministic and testable.
 - Treat all source data as untrusted. Validate schemas, types, ranges, identifiers,

@@ -7,13 +7,22 @@ name = "memento-analytics-demo"
 version = "0.1.0"
 description = "Local manifest-driven retail ingestion MVP"
 requires-python = ">=3.11"
-dependencies = ["duckdb>=1.4.3,<2", "pyarrow>=21,<24"]
+dependencies = [
+  "duckdb>=1.4.3,<2",
+  "fastapi>=0.116,<1",
+  "pyarrow>=21,<24",
+  "pydantic>=2.11,<3",
+  "uvicorn>=0.35,<1",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.4,<9"]
+dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
 
 [project.scripts]
 memento-ingest = "memento.cli:main"
+memento-predict = "memento.prediction_cli:main"
+memento-evaluate = "memento.evaluation_cli:main"
+memento-serve = "memento.api_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -21,3 +30,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "e2e: exercises the synthetic pipeline across real runtime boundaries",
+]
