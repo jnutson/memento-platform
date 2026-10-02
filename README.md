@@ -57,6 +57,12 @@ Frontend verification commands are `npm run typecheck`, `npm run lint`, `npm tes
 `npm run build`, and `npm run test:e2e`. The Playwright workflow uses minimized route
 fixtures; Python integration tests cover the live Parquet-to-HTTP boundary.
 
+From the repository root, `make verify` runs the complete merge gate: Python tests,
+frontend typechecking, linting, unit tests, production build, mocked-browser workflow,
+and the full browser-to-API-to-Parquet workflow. GitHub Actions runs the same gate on
+every pull request and every push to `main`. Use `make setup` to create the local Python
+virtual environment and install the Python and frontend dependencies.
+
 The complete synthetic pipeline can be exercised independently with
 `.venv/bin/pytest tests/e2e` (or `.venv/bin/pytest -m e2e`). From `web/`, run
 `npm run test:e2e:fullstack` to verify the browser, real API, and published Parquet
