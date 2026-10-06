@@ -1,7 +1,7 @@
 PYTHON ?= .venv/bin/python
 NPM ?= npm
 
-.PHONY: setup test-python typecheck lint test-web build test-e2e test-e2e-fullstack verify verify-ci
+.PHONY: setup test-python typecheck lint test-web build test-e2e test-e2e-fullstack verify verify-ci delivery-ready delivery-pr-check
 
 setup:
 	python3 -m venv .venv
@@ -32,3 +32,9 @@ test-e2e-fullstack:
 verify: verify-ci
 
 verify-ci: test-python typecheck lint test-web build test-e2e test-e2e-fullstack
+
+delivery-ready:
+	$(PYTHON) tools/delivery.py ready --base "$(or $(BASE),origin/main)" --verification "$(or $(VERIFICATION),no-db)"
+
+delivery-pr-check:
+	$(PYTHON) tools/delivery.py pr-check

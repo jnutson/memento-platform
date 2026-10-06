@@ -27,6 +27,7 @@ def _canonical_fixture(root: Path) -> Path:
         "company_item": """SELECT 'MIRO_TOYS'::VARCHAR company_id,'MIRO-SPARK-001'::VARCHAR company_item_id,'Miro Spark One'::VARCHAR company_item_name,'MIRO_SPARK'::VARCHAR display_brand_id,'prd_test'::VARCHAR product_id,'0'::VARCHAR source_company_id,'100'::VARCHAR source_product_id,DATE '2026-01-01' effective_from,NULL::DATE effective_to""",
         "replenishment_commitment": """SELECT * FROM (SELECT NULL::VARCHAR retailer_order_id,NULL::INTEGER order_line_number,NULL::INTEGER event_version,NULL::VARCHAR location_id,NULL::VARCHAR product_id,NULL::BIGINT ordered_quantity,NULL::BIGINT invoiced_quantity,NULL::BIGINT received_quantity,NULL::TIMESTAMPTZ order_created_at,NULL::TIMESTAMPTZ approved_to_ship_at,NULL::TIMESTAMPTZ dc_invoiced_at,NULL::DATE expected_store_receipt_date,NULL::TIMESTAMPTZ actual_store_receipt_at,NULL::VARCHAR status_code,NULL::TIMESTAMPTZ known_at) WHERE false""",
         "reaction_constraint": """SELECT 'MIRO_TOYS'::VARCHAR company_id,'brand'::VARCHAR item_scope_type_code,'MIRO_SPARK'::VARCHAR item_scope_id,10::INTEGER minimum_reaction_days,DATE '2026-01-01' effective_from,NULL::DATE effective_to""",
+        "company_item_economics": """SELECT 'MIRO_TOYS'::VARCHAR company_id,'MIRO-SPARK-001'::VARCHAR company_item_id,'USD'::VARCHAR currency_code,4.00::DECIMAL(20,2) unit_cost_amount,DATE '2026-01-01' effective_from,NULL::DATE effective_to""",
     }
     files = []
     for table, query in queries.items():
@@ -46,6 +47,7 @@ def test_prediction_pipeline_publishes_ranked_evidence_and_replays(tmp_path: Pat
     manifest = json.loads((output / "manifest.json").read_text())
     assert manifest["candidate_count"] == 1
     assert manifest["display_count"] == 1
+    assert manifest["reason_code_counts"] == {}
     con = duckdb.connect()
     prediction = con.execute("SELECT predicted_oos_date,rank_position,is_top_10,impact_score FROM read_parquet(?)", [str(output / "oos_prediction.parquet")]).fetchone()
     assert str(prediction[0]) == "2027-01-31"
@@ -58,6 +60,26 @@ def test_prediction_pipeline_publishes_ranked_evidence_and_replays(tmp_path: Pat
     before = (output / "manifest.json").read_bytes()
     assert run_predictions(canonical, data_root=tmp_path / "data") == output
     assert (output / "manifest.json").read_bytes() == before
+
+
+def test_prediction_pipeline_reports_suppressed_availability_candidate(tmp_path: Path):
+    canonical = _canonical_fixture(tmp_path)
+    inventory = canonical / "inventory_daily" / "part-00000.parquet"
+    replacement = canonical / "inventory_daily" / "replacement.parquet"
+    con = duckdb.connect()
+    con.execute("CREATE TEMP TABLE rewritten_inventory AS SELECT * REPLACE (100::BIGINT AS on_hand_quantity) FROM read_parquet(?)", [str(inventory)])
+    con.execute("COPY rewritten_inventory TO ? (FORMAT PARQUET, COMPRESSION ZSTD)", [str(replacement)])
+    replacement.replace(inventory)
+    manifest = json.loads((canonical / "manifest.json").read_text())
+    for entry in manifest["files"]:
+        if entry["path"] == "inventory_daily/part-00000.parquet":
+            entry.update(bytes=inventory.stat().st_size, sha256=hashlib.sha256(inventory.read_bytes()).hexdigest())
+    (canonical / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
+
+    output = run_predictions(canonical, data_root=tmp_path / "data")
+    result = json.loads((output / "manifest.json").read_text())
+    assert result["candidate_count"] == 0
+    assert result["reason_code_counts"] == {"availability_no_base_oos": 1}
 
 
 def test_matured_prediction_evaluation_uses_only_later_observations(tmp_path: Path):

@@ -1,7 +1,7 @@
-# Miro Toys OOS Prediction MVP — Data Scope
+# Memento Signal Three-Metric MVP — Data Scope
 
 Status: accepted direction
-Contract version: `miro-oos-data-scope-v1.6.0`
+Contract version: `memento-signal-data-scope-v1.0.0`
 
 ## Outcome
 
@@ -79,7 +79,12 @@ immutable historical evidence but is not the Miro OOS base release.
 
 ## Required synthetic extensions
 
-Only three extension datasets are required.
+Four extension datasets are required. The fourth is
+`company_item_economics(company_id, company_item_id, currency_code,
+unit_cost_amount, effective_from, effective_to)`. Exactly one USD, nonnegative row must
+resolve for every scoped item at the cutoff. Unit cost is confidential internal input;
+raw values must not enter logs, exceptions, client payloads, or committed real-data
+fixtures.
 
 ### `dim_item`
 

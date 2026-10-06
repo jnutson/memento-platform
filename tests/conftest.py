@@ -78,7 +78,7 @@ def release_set_manifest(tmp_path: Path) -> Path:
     wm_manifest = json.loads((walmart / "manifest.json").read_text())
     wm_manifest["manifest_schema_version"] = "2.0.0"
     wm_manifest["configuration_hash"] = "a" * 64
-    wm_manifest["contract_versions"] = {"product": "miro-oos-product-v1.6.0", "metrics": "miro-oos-metrics-v1.6.0", "data_scope": "miro-oos-data-scope-v1.6.0", "glossary": "memento-glossary-v1.3.0"}
+    wm_manifest["contract_versions"] = {"product": "memento-signal-product-v1.0.0", "metrics": "memento-signal-metrics-v1.0.0", "data_scope": "memento-signal-data-scope-v1.0.0", "glossary": "memento-glossary-v1.4.0"}
     (walmart / "manifest.json").write_text(json.dumps(wm_manifest, sort_keys=True, separators=(",", ":")))
     con = duckdb.connect()
     extension_queries = {
@@ -89,8 +89,9 @@ def release_set_manifest(tmp_path: Path) -> Path:
           ('PO-RCPT',1,2,10,0,100,2,2,2,TIMESTAMPTZ '2026-01-20 00:00:00+00',TIMESTAMPTZ '2026-01-21 00:00:00+00',TIMESTAMPTZ '2026-01-22 00:00:00+00',DATE '2026-01-31',TIMESTAMPTZ '2026-01-31 10:00:00+00','received',TIMESTAMPTZ '2026-01-31 10:00:00+00')
         ) t(retailer_order_id,order_line_nbr,event_version,store_nbr,op_cmpny_cd,wm_item_nbr,ordered_qty,invoiced_qty,received_qty,order_created_at,approved_to_ship_at,dc_invoiced_at,expected_store_receipt_date,actual_store_receipt_at,status_cd,known_at)""",
         "item_reaction_constraint": """SELECT 'MIRO_TOYS'::VARCHAR company_id,'brand'::VARCHAR item_scope_type_cd,'MIRO_SPARK'::VARCHAR item_scope_id,10::INTEGER minimum_reaction_days,DATE '2025-01-01' effective_from,NULL::DATE effective_to""",
+        "company_item_economics": """SELECT 'MIRO_TOYS'::VARCHAR company_id,'MIRO-SPARK-001'::VARCHAR company_item_id,'USD'::VARCHAR currency_code,1.25::DECIMAL(20,2) unit_cost_amount,DATE '2025-01-01' effective_from,NULL::DATE effective_to""",
     }
-    primary = {"dim_item": ["company_id", "company_item_id"], "retailer_replenishment_commitment": ["retailer_order_id", "order_line_nbr", "event_version"], "item_reaction_constraint": ["company_id", "item_scope_type_cd", "item_scope_id", "effective_from"]}
+    primary = {"dim_item": ["company_id", "company_item_id"], "retailer_replenishment_commitment": ["retailer_order_id", "order_line_nbr", "event_version"], "item_reaction_constraint": ["company_id", "item_scope_type_cd", "item_scope_id", "effective_from"], "company_item_economics": ["company_id", "company_item_id", "effective_from"]}
     datasets = []
     for name, query in extension_queries.items():
         folder = extension / name
@@ -99,7 +100,7 @@ def release_set_manifest(tmp_path: Path) -> Path:
         con.execute(f"COPY ({query}) TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)")
         datasets.append({"dataset_name": name, "relative_output_path": name, "row_count": con.execute(f"SELECT count(*) FROM ({query})").fetchone()[0], "file_count": 1, "primary_key": primary[name], "schema_checksum": "0" * 64, "sha256": _tree_hash(folder)})
     release_id = wm_manifest["release_id"]
-    extension_manifest = {"manifest_schema_version": "1.0.0", "release_id": release_id, "source_walmart_manifest_sha256": digest(walmart / "manifest.json"), "configuration_hash": "a" * 64, "contract_versions": wm_manifest["contract_versions"], "po_retention_days": 56, "datasets": datasets, "checks": {"three_datasets_only": True, "cutoff_safe": True}}
+    extension_manifest = {"manifest_schema_version": "1.0.0", "release_id": release_id, "source_walmart_manifest_sha256": digest(walmart / "manifest.json"), "configuration_hash": "a" * 64, "contract_versions": wm_manifest["contract_versions"], "po_retention_days": 56, "datasets": datasets, "checks": {"four_datasets_only": True, "cutoff_safe": True}}
     (extension / "manifest.json").write_text(json.dumps(extension_manifest, sort_keys=True, separators=(",", ":")))
     release_set = {"manifest_schema_version": "1.0.0", "release_id": release_id, "as_of": wm_manifest["as_of"], "configuration_hash": "a" * 64, "contract_versions": wm_manifest["contract_versions"], "walmart_manifest": "packages/walmart/manifest.json", "walmart_manifest_sha256": digest(walmart / "manifest.json"), "extension_manifest": "packages/extension/manifest.json", "extension_manifest_sha256": digest(extension / "manifest.json")}
     target = release_root / "release-sets" / release_id / "manifest.json"

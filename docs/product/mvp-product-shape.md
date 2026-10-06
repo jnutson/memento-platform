@@ -1,7 +1,7 @@
-# Miro Toys Interpretable OOS Prediction MVP — Product Shape
+# Memento Signal Three-Metric MVP — Product Shape
 
 Status: accepted product direction
-Contract version: `miro-oos-product-v1.6.0`
+Contract version: `memento-signal-product-v1.0.0`
 
 The formulas and numeric defaults behind this product shape are defined in
 `docs/product/mvp-metric-contract.md`. Terms are governed by
@@ -9,6 +9,19 @@ The formulas and numeric defaults behind this product shape are defined in
 meanings.
 
 ## Single product capability
+
+Memento Signal presents one immutable ranked queue containing Availability Risk,
+Demand Momentum Gap, and Inventory Imbalance Exposure. Every row preserves its native
+metric and economic basis. Impact normalization occurs within signal type; reaction and
+confidence use shared definitions. Overall ranks are assigned before the top-ten limit,
+and filtering never recomputes or renumbers them.
+
+The persisted grain is `signal_as_of x store_id x product_id x signal_type x
+signal_episode`. Type order for deterministic ties is `availability`,
+`demand_momentum`, `inventory_imbalance`. The interface distinguishes revenue
+opportunity, contribution impact, inventory capital, and carrying-cost exposure.
+
+### Availability compatibility
 
 Memento predicts when a scoped Miro Toys item at a Walmart store will go out of stock
 within the next 28 days and ranks eligible predictions using exactly three dimensions:

@@ -1,9 +1,23 @@
-# Miro Toys Interpretable OOS Prediction MVP — Metric Contract
+# Memento Signal Three-Metric MVP — Metric Contract
 
 Status: accepted for MVP implementation
-Contract version: `miro-oos-metrics-v1.6.0`
+Contract version: `memento-signal-metrics-v1.0.0`
 
 ## Purpose
+
+The common rank is `0.50 * type_relative_impact + 0.30 * reaction + 0.20 *
+confidence`. Midrank normalization is independent within each signal type. Primary
+economics are lost retail sales for Availability, absolute contribution impact for
+Demand Momentum, and inventory capital plus 28-day carrying cost for Inventory
+Imbalance. Missing economics remain null.
+
+Demand Momentum uses six baseline and two recent completed weeks, requires both recent
+weeks to diverge in the same direction, clamps the recent/baseline multiplier to
+`[0.50,1.50]`, and suppresses gaps not exceeding the historical WAPE band. Inventory
+Imbalance uses `ceil(7 * clamped_wape)` safety days and a target cover equal to minimum
+reaction plus safety days; base-path OOS suppresses the excess signal. The carrying
+rate and its version are required publication inputs; no default is invented, and the
+rate is not a UI control or a customer-specific assumption.
 
 This document is the mathematical source of truth for the single MVP capability:
 predicting a store-item out-of-stock date and ranking eligible predictions by estimated

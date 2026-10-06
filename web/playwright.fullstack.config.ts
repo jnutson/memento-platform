@@ -18,7 +18,7 @@ export default defineConfig({
     },
     {
       command: `env MEMENTO_API_ORIGIN=${apiOrigin} npm run dev -- --port 3100`,
-      url: `${webOrigin}/attention`,
+      url: `${webOrigin}/signal`,
       reuseExistingServer: false,
       timeout: 120_000,
     },

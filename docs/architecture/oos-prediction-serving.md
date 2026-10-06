@@ -1,17 +1,17 @@
-# OOS Prediction Serving Boundary
+# Memento Signal Serving Boundary
 
 Status: implemented MVP contract
 
-The Memento calculation job publishes immutable Parquet artifacts; it does not run an
-HTTP server. The separate UI/API application reads these artifacts through
-`memento.serving.PredictionStore`.
+The calculation job publishes immutable Parquet artifacts; it does not run an HTTP
+server. `SignalStore` reads `signal.parquet`, `signal_evidence.parquet`, and the bound
+manifest. `PredictionStore` remains available only for historical OOS releases.
 
 ## Discovery
 
-`data/predictions/current.json` contains only:
+`data/signals/current.json` contains only:
 
 ```json
-{"manifest":"<prediction-set-id>/manifest.json","prediction_set_id":"<prediction-set-id>"}
+{"manifest":"<signal-set-id>/manifest.json","signal_set_id":"<signal-set-id>"}
 ```
 
 The pointer changes atomically after a complete prediction release has been written.
@@ -22,10 +22,10 @@ checksum mismatches.
 
 - `run()` returns the immutable run manifest, calculation versions, source release-set
   lineage, source package checksums, cutoff, counts, and file inventory.
-- `top_predictions(limit=10)` returns rank positions 1 through 10 in deterministic
-  order. The limit cannot exceed 10.
-- `evidence(prediction_id)` returns the 28-day low/base/high calculation trace for one
-  prediction, ordered by projection date and path.
+- `top_signals(signal_type=None)` returns the immutable overall top ten. A type filter
+  removes rows but preserves their overall positions.
+- `signal(signal_id)` and `evidence(signal_id)` return one signal and its contracted
+  type-specific evidence.
 
 Dates, UTC timestamps, decimals, and arrays remain typed values at this boundary. The
 HTTP application owns their JSON encoding. It must not recompute scores, change ranks,

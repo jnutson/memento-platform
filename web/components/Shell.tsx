@@ -10,7 +10,7 @@ export default function Shell({ children }: Readonly<{ children: ReactNode }>) {
         <span className={styles.context}>Walmart · Miro Spark</span>
       </header>
       <nav className={styles.sidebar} aria-label="Product navigation">
-        <span className={`${styles.item} ${styles.active}`} aria-current="page">Attention</span>
+        <span className={`${styles.item} ${styles.active}`} aria-current="page">Memento Signal</span>
       </nav>
       <main className={styles.main}>{children}</main>
     </div>

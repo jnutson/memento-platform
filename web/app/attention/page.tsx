@@ -1,5 +1,5 @@
-import AttentionView from "@/components/attention/AttentionView";
+import { redirect } from "next/navigation";
 
 export default function AttentionPage() {
-  return <AttentionView />;
+  redirect("/signal");
 }

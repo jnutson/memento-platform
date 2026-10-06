@@ -1,10 +1,21 @@
-# Memento Glossary — Miro Toys OOS Prediction MVP
+# Memento Glossary — Memento Signal MVP
 
 Status: accepted terminology for MVP implementation
 
-Glossary version: `memento-glossary-v1.3.0`
+Glossary version: `memento-glossary-v1.4.0`
 
 ## Purpose and authority
+
+Memento Signal is an immutable ranked set of heterogeneous retail conditions. An
+Availability Risk is projected depletion and lost retail sales. A Demand Momentum Gap
+is persistent stockout-aware divergence from the retailer forecast and may represent
+revenue opportunity or forecast-overstatement exposure. Inventory Imbalance Exposure
+is projected inventory above a deterministic policy band; inventory capital and
+carrying cost are exposure measures, not realized loss or guaranteed savings.
+
+Company item unit cost is an approved effective-dated internal input. It is never
+inferred from retailer values and never sent to the client; only contracted derived
+economic amounts may be displayed.
 
 This glossary fixes the source and derived terms used by the single MVP capability:
 predicting store-item out-of-stock timing and ranking predictions by impact, reaction
