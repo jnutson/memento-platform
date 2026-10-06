@@ -13,7 +13,7 @@ from .demand_signal import build_demand_candidate
 from .inventory_signal import build_inventory_candidate
 from .models import IngestionFailure, ValidationResult
 from .prediction import run_predictions
-from .signal_contract import SIGNAL_TYPE_ORDER
+from .signal_contract import ForecastVintage, Observation, SIGNAL_TYPE_ORDER
 from .signal_publication import publish_signal_set
 from .signal_ranking import rank_signal_candidates
 from .metrics import clamp, normalize_weekday_shares
@@ -25,8 +25,8 @@ def _scan(canonical_root: Path, table: str) -> str:
     return str(canonical_root / table / "*.parquet")
 
 
-def _load_observations(connection: duckdb.DuckDBPyConnection, canonical_root: Path) -> list[dict[str, object]]:
-    return connection.execute("""WITH sales_day AS (
+def _load_observations(connection: duckdb.DuckDBPyConnection, canonical_root: Path) -> list[Observation]:
+    rows = connection.execute("""WITH sales_day AS (
         SELECT business_date,location_id,product_id,sum(sales_quantity)::DOUBLE units,sum(sales_amount)::DOUBLE amount
         FROM read_parquet(?) GROUP BY ALL)
         SELECT i.business_date observation_date,i.location_id store_id,i.product_id,
@@ -48,7 +48,13 @@ def _load_observations(connection: duckdb.DuckDBPyConnection, canonical_root: Pa
             _scan(canonical_root, "company_item"), _scan(canonical_root, "company_item_economics"),
             _scan(canonical_root, "product"), _scan(canonical_root, "location"),
             _scan(canonical_root, "inventory_daily"),
-        ]).to_arrow_table().to_pylist()
+        ]).fetchall()
+    return [Observation(
+        observation_date=row[0], store_id=str(row[1]), product_id=str(row[2]),
+        on_hand=float(row[3]), price=float(row[4]) if row[4] is not None else None,
+        assorted=bool(row[5]), replenishment_enabled=bool(row[6]), location_status=str(row[7]),
+        company_item_id=str(row[8]), unit_cost=float(row[9]),
+    ) for row in rows]
 
 
 def _load_reactions(connection: duckdb.DuckDBPyConnection, canonical_root: Path, observation_date: date) -> dict[tuple[str, str], int]:
@@ -60,14 +66,14 @@ def _load_reactions(connection: duckdb.DuckDBPyConnection, canonical_root: Path,
     return {(str(scope), str(key)): int(days) for scope, key, days in rows}
 
 
-def _minimum_reaction(observation: dict[str, object], reactions: dict[tuple[str, str], int]) -> int:
+def _minimum_reaction(observation: Observation, reactions: dict[tuple[str, str], int]) -> int:
     value = reactions.get(("item", str(observation["company_item_id"])), reactions.get(("brand", "MIRO_SPARK"), reactions.get(("all", "all"))))
     if value is None:
         raise ValueError(f"no effective reaction constraint for product {observation['product_id']}")
     return value
 
 
-def _load_history(connection: duckdb.DuckDBPyConnection, canonical_root: Path, observation: dict[str, object]) -> list[tuple[int, float, float]]:
+def _load_history(connection: duckdb.DuckDBPyConnection, canonical_root: Path, observation: Observation) -> list[tuple[int, float, float]]:
     rows = connection.execute("""WITH weekly AS (
       SELECT c.retail_year_week,sum(s.sales_quantity)::DOUBLE actual_units
       FROM read_parquet(?) s JOIN read_parquet(?) i USING(business_date,location_id,product_id)
@@ -147,8 +153,8 @@ def _load_weekday_inputs(
 def _daily_base_forecast(
     connection: duckdb.DuckDBPyConnection,
     canonical_root: Path,
-    observation: dict[str, object],
-    future: list[dict[str, object]],
+    observation: Observation,
+    future: list[ForecastVintage],
     weekday_inputs: tuple[
         dict[tuple[str, str], tuple[int, list[float]]],
         dict[str, tuple[int, list[float]]],
@@ -180,7 +186,7 @@ def _daily_base_forecast(
     return [weekly[int(week)] * shares[int(weekday) - 1] for _, week, weekday in calendar]
 
 
-def _load_inbound(connection: duckdb.DuckDBPyConnection, canonical_root: Path, observation: dict[str, object], signal_as_of: datetime) -> dict[date, float]:
+def _load_inbound(connection: duckdb.DuckDBPyConnection, canonical_root: Path, observation: Observation, signal_as_of: datetime) -> dict[date, float]:
     rows = connection.execute("""WITH latest AS (
       SELECT * FROM read_parquet(?) WHERE location_id=? AND product_id=? AND known_at<=?
       QUALIFY row_number() OVER(PARTITION BY retailer_order_id,order_line_number ORDER BY event_version DESC,known_at DESC)=1)
@@ -218,10 +224,15 @@ def run_signals(
     signal_as_of = datetime.fromisoformat(str(manifest["as_of"]).replace("Z", "+00:00"))
     batch = build_availability_candidates(connection, prediction_root=prediction_root, observations=observations, canonical_manifest=manifest)
 
-    forecast_rows = connection.execute("SELECT * FROM read_parquet(?)", [str(prediction_root / "demand_forecast_vintage.parquet")]).to_arrow_table().to_pylist()
-    forecasts_by_key: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    forecast_rows = connection.execute(
+        "SELECT store_id,product_id,target_retail_year_week,memento_weekly_demand_base,forecast_wape FROM read_parquet(?)",
+        [str(prediction_root / "demand_forecast_vintage.parquet")],
+    ).fetchall()
+    forecasts_by_key: dict[tuple[str, str], list[ForecastVintage]] = defaultdict(list)
     for row in forecast_rows:
-        forecasts_by_key[(str(row["store_id"]), str(row["product_id"]))].append(row)
+        forecasts_by_key[(str(row[0]), str(row[1]))].append(ForecastVintage(
+            target_retail_year_week=int(row[2]), memento_weekly_demand_base=row[3], forecast_wape=row[4],
+        ))
 
     for observation in observations:
         if (

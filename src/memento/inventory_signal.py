@@ -7,7 +7,7 @@ from typing import Sequence
 
 from .metrics import ProjectionDay, clamp
 from .metrics import project_inventory
-from .signal_contract import CandidateBatch, common_signal_fields, decimal_value, stable_signal_id
+from .signal_contract import CandidateBatch, Observation, common_signal_fields, decimal_value, stable_signal_id
 
 
 @dataclass(frozen=True)
@@ -68,13 +68,13 @@ def calculate_inventory_imbalance(
 
 
 def build_inventory_candidate(
-    observation: dict[str, object], canonical_manifest: dict[str, object], *,
+    observation: Observation, canonical_manifest: dict[str, object], *,
     forward_daily_forecast: Sequence[float], forecast_quality: float, history_count: int,
     minimum_reaction_days: int, inbound_by_date: dict[date, float], annual_carrying_cost_rate: float,
 ) -> CandidateBatch:
     """Produce at most one unranked Inventory Imbalance candidate and evidence."""
     band = 1 - forecast_quality
-    paths = {name: [value * factor for value in forward_daily_forecast] for name, factor in (("low", 1-band), ("base", 1), ("high", 1+band))}
+    paths: dict[str, Sequence[float]] = {name: [value * factor for value in forward_daily_forecast] for name, factor in (("low", 1-band), ("base", 1), ("high", 1+band))}
     horizon = [observation["observation_date"] + timedelta(days=index) for index in range(1, 29)]
     trace, _ = project_inventory(float(observation["on_hand"]), horizon, paths, inbound_by_date)
     result = calculate_inventory_imbalance(

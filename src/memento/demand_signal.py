@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import Sequence
 
 from .metrics import clamp, forecast_wape
-from .signal_contract import CandidateBatch, common_signal_fields, decimal_value, stable_signal_id
+from .signal_contract import CandidateBatch, Observation, common_signal_fields, decimal_value, stable_signal_id
 
 
 MULTIPLIER_MIN = 0.50
@@ -80,7 +80,7 @@ def calculate_demand_momentum(
 
 
 def build_demand_candidate(
-    observation: dict[str, object], canonical_manifest: dict[str, object], *,
+    observation: Observation, canonical_manifest: dict[str, object], *,
     weekly_history: Sequence[tuple[int, float, float]], forward_daily_forecast: Sequence[float],
     minimum_reaction_days: int,
 ) -> CandidateBatch:
@@ -88,6 +88,9 @@ def build_demand_candidate(
     result = calculate_demand_momentum([(row[1], row[2]) for row in weekly_history], forward_daily_forecast)
     if not result.eligible:
         return CandidateBatch(reason_codes=[result.reason_code] if result.reason_code else [])
+    price = observation["price"]
+    if price is None:
+        raise ValueError("demand candidate requires an applicable unit price")
     key = (str(observation["store_id"]), str(observation["product_id"]))
     signal_id = stable_signal_id(str(canonical_manifest["source_release_set_id"]), str(canonical_manifest["as_of"]), *key, "demand_momentum", result.direction or "")
     completeness = min(len(weekly_history) / 8, 1)
@@ -96,8 +99,8 @@ def build_demand_candidate(
         "forecast_gap_units", abs(result.forecast_gap_units), result.days_until_material_impact or 28,
         minimum_reaction_days, result.forecast_quality, completeness, result.directional_persistence,
     )
-    retail = abs(result.forecast_gap_units) * float(observation["price"])
-    contribution = abs(result.forecast_gap_units) * max(float(observation["price"]) - float(observation["unit_cost"]), 0)
+    retail = abs(result.forecast_gap_units) * price
+    contribution = abs(result.forecast_gap_units) * max(price - observation["unit_cost"], 0)
     candidate = {
         **common, "estimated_retail_sales_impact_amount": decimal_value(retail, 2),
         "estimated_contribution_impact_amount": decimal_value(contribution, 2), "estimated_cost_impact_amount": None,
