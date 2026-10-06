@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_EVEN
+from typing import TypedDict
 
 import pyarrow as pa
 
@@ -14,6 +15,25 @@ SIGNAL_CONTRACT_VERSION = "memento-signal-metrics-v1.0.0"
 SIGNAL_PUBLICATION_VERSION = "memento-signal-publication-v1"
 SIGNAL_RANKER_VERSION = "memento-signal-ranker-v1"
 SIGNAL_TYPE_ORDER = {"availability": 0, "demand_momentum": 1, "inventory_imbalance": 2}
+
+
+class Observation(TypedDict):
+    observation_date: date
+    store_id: str
+    product_id: str
+    on_hand: float
+    price: float | None
+    assorted: bool
+    replenishment_enabled: bool
+    location_status: str
+    company_item_id: str
+    unit_cost: float
+
+
+class ForecastVintage(TypedDict):
+    target_retail_year_week: int
+    memento_weekly_demand_base: Decimal
+    forecast_wape: Decimal | None
 
 SIGNAL_SCHEMA = pa.schema([
     ("signal_id", pa.string()), ("signal_type", pa.string()), ("signal_direction", pa.string()),
@@ -72,7 +92,7 @@ def stable_signal_id(source_release_set_id: str, signal_as_of: str, store_id: st
 
 
 def common_signal_fields(
-    observation: dict[str, object], manifest: dict[str, object], signal_id: str,
+    observation: Observation, manifest: dict[str, object], signal_id: str,
     signal_type: str, direction: str, headline: str, value: float, days: int,
     minimum_reaction: int, quality: float, completeness: float, stability: float,
 ) -> dict[str, object]:

@@ -5,14 +5,14 @@ from pathlib import Path
 
 import duckdb
 
-from .signal_contract import CandidateBatch, common_signal_fields, decimal_value, stable_signal_id
+from .signal_contract import CandidateBatch, Observation, common_signal_fields, decimal_value, stable_signal_id
 
 
 def build_availability_candidates(
     connection: duckdb.DuckDBPyConnection,
     *,
     prediction_root: Path,
-    observations: list[dict[str, object]],
+    observations: list[Observation],
     canonical_manifest: dict[str, object],
 ) -> CandidateBatch:
     """Adapt immutable legacy OOS outputs into unranked Availability signals."""
@@ -26,6 +26,9 @@ def build_availability_candidates(
     ).to_arrow_table().to_pylist()
     for source in predictions:
         observation = observation_by_key[(source["store_id"], source["product_id"])]
+        price = observation["price"]
+        if price is None:
+            raise ValueError("availability candidate requires an applicable unit price")
         signal_id = stable_signal_id(
             str(canonical_manifest["source_release_set_id"]), str(canonical_manifest["as_of"]),
             str(source["store_id"]), str(source["product_id"]), "availability", str(source["predicted_oos_date"]),
@@ -36,7 +39,7 @@ def build_availability_candidates(
             int(source["days_until_predicted_oos"]), int(source["minimum_reaction_days"]),
             float(source["forecast_quality"]), float(source["data_completeness"]), float(source["timing_stability_score"]),
         )
-        contribution = float(source["estimated_lost_units"]) * max(float(observation["price"]) - float(observation["unit_cost"]), 0)
+        contribution = float(source["estimated_lost_units"]) * max(price - observation["unit_cost"], 0)
         batch.candidates.append({
             **common, "estimated_retail_sales_impact_amount": source["estimated_lost_sales_amount"],
             "estimated_contribution_impact_amount": decimal_value(contribution, 2), "estimated_cost_impact_amount": None,

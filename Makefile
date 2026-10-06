@@ -1,7 +1,7 @@
 PYTHON ?= .venv/bin/python
 NPM ?= npm
 
-.PHONY: setup test-python typecheck lint test-web build test-e2e test-e2e-fullstack verify verify-ci delivery-ready delivery-pr-check
+.PHONY: setup test-python python-typecheck typecheck lint test-web build test-e2e test-e2e-fullstack verify verify-ci delivery-ready delivery-pr-check
 
 setup:
 	python3 -m venv .venv
@@ -11,7 +11,10 @@ setup:
 test-python:
 	$(PYTHON) -m pytest
 
-typecheck:
+python-typecheck:
+	$(PYTHON) -m pyright --pythonpath $(PYTHON)
+
+typecheck: python-typecheck
 	$(NPM) --prefix web run typecheck
 
 lint:

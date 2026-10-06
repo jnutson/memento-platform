@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28,<1", "pytest>=8.4,<9"]
+dev = ["httpx>=0.28,<1", "pyright>=1.1,<2", "pytest>=8.4,<9"]
 
 [project.scripts]
 memento-ingest = "memento.cli:main"
@@ -35,3 +35,18 @@ pythonpath = ["."]
 markers = [
   "e2e: exercises the synthetic pipeline across real runtime boundaries",
 ]
+
+[tool.pyright]
+include = [
+  "src/memento/metrics.py",
+  "src/memento/signal_contract.py",
+  "src/memento/availability_signal.py",
+  "src/memento/demand_signal.py",
+  "src/memento/inventory_signal.py",
+  "src/memento/signals.py",
+  "tools",
+]
+exclude = ["**/__pycache__"]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+reportMissingTypeStubs = false
