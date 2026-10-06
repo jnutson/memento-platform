@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 
 
-CONTRACT_VERSION = "memento-retail-v1"
+CONTRACT_VERSION = "memento-retail-v1.1"
 
 SCHEMAS: dict[str, list[tuple[str, str]]] = {
     "calendar_day": [("retail_calendar_id","VARCHAR"),("calendar_date","DATE"),("calendar_day_of_month","UTINYINT"),("calendar_weekday_number","UTINYINT"),("calendar_weekday_name","VARCHAR"),("calendar_month_number","UTINYINT"),("calendar_month_name","VARCHAR"),("calendar_quarter_number","UTINYINT"),("calendar_year","SMALLINT"),("retail_day_number","USMALLINT"),("retail_week_number","UTINYINT"),("retail_month_number","UTINYINT"),("retail_quarter_number","UTINYINT"),("retail_year","SMALLINT"),("retail_year_week","INTEGER"),("comparable_calendar_date","DATE"),("comparable_retail_year_week","INTEGER")],
@@ -15,6 +15,7 @@ SCHEMAS: dict[str, list[tuple[str, str]]] = {
     "company_item": [("company_id","VARCHAR"),("company_item_id","VARCHAR"),("company_item_name","VARCHAR"),("display_brand_id","VARCHAR"),("product_id","VARCHAR"),("source_company_id","VARCHAR"),("source_product_id","VARCHAR"),("effective_from","DATE"),("effective_to","DATE")],
     "replenishment_commitment": [("retailer_order_id","VARCHAR"),("order_line_number","INTEGER"),("event_version","INTEGER"),("location_id","VARCHAR"),("product_id","VARCHAR"),("ordered_quantity","BIGINT"),("invoiced_quantity","BIGINT"),("received_quantity","BIGINT"),("order_created_at","TIMESTAMP WITH TIME ZONE"),("approved_to_ship_at","TIMESTAMP WITH TIME ZONE"),("dc_invoiced_at","TIMESTAMP WITH TIME ZONE"),("expected_store_receipt_date","DATE"),("actual_store_receipt_at","TIMESTAMP WITH TIME ZONE"),("status_code","VARCHAR"),("known_at","TIMESTAMP WITH TIME ZONE")],
     "reaction_constraint": [("company_id","VARCHAR"),("item_scope_type_code","VARCHAR"),("item_scope_id","VARCHAR"),("minimum_reaction_days","INTEGER"),("effective_from","DATE"),("effective_to","DATE")],
+    "company_item_economics": [("company_id","VARCHAR"),("company_item_id","VARCHAR"),("currency_code","VARCHAR"),("unit_cost_amount","DECIMAL(20,2)"),("effective_from","DATE"),("effective_to","DATE")],
 }
 
 

@@ -12,21 +12,25 @@ SOURCE_COLUMNS = {
     "dim_item": ["company_id", "company_item_id", "company_item_name", "display_brand_id", "op_cmpny_cd", "wm_item_nbr", "effective_from", "effective_to"],
     "retailer_replenishment_commitment": ["retailer_order_id", "order_line_nbr", "event_version", "store_nbr", "op_cmpny_cd", "wm_item_nbr", "ordered_qty", "invoiced_qty", "received_qty", "order_created_at", "approved_to_ship_at", "dc_invoiced_at", "expected_store_receipt_date", "actual_store_receipt_at", "status_cd", "known_at"],
     "item_reaction_constraint": ["company_id", "item_scope_type_cd", "item_scope_id", "minimum_reaction_days", "effective_from", "effective_to"],
+    "company_item_economics": ["company_id", "company_item_id", "currency_code", "unit_cost_amount", "effective_from", "effective_to"],
 }
 SOURCE_TYPES = {
     "dim_item": ["VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "TINYINT", "BIGINT", "DATE", "DATE"],
     "retailer_replenishment_commitment": ["VARCHAR", "INTEGER", "INTEGER", "INTEGER", "TINYINT", "BIGINT", "INTEGER", "INTEGER", "INTEGER", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH TIME ZONE", "DATE", "TIMESTAMP WITH TIME ZONE", "VARCHAR", "TIMESTAMP WITH TIME ZONE"],
     "item_reaction_constraint": ["VARCHAR", "VARCHAR", "VARCHAR", "INTEGER", "DATE", "DATE"],
+    "company_item_economics": ["VARCHAR", "VARCHAR", "VARCHAR", "DECIMAL(20,2)", "DATE", "DATE"],
 }
 PRIMARY_KEYS = {
     "dim_item": ["company_id", "company_item_id"],
     "retailer_replenishment_commitment": ["retailer_order_id", "order_line_nbr", "event_version"],
     "item_reaction_constraint": ["company_id", "item_scope_type_cd", "item_scope_id", "effective_from"],
+    "company_item_economics": ["company_id", "company_item_id", "effective_from"],
 }
 MAPPING = {
     "dim_item": "company_item",
     "retailer_replenishment_commitment": "replenishment_commitment",
     "item_reaction_constraint": "reaction_constraint",
+    "company_item_economics": "company_item_economics",
 }
 ALLOWED_STATUSES = {"ordered", "approved_to_ship", "in_transit", "partially_received", "received", "cancelled"}
 
@@ -56,7 +60,7 @@ def validate_extension_data(
         nulls = con.execute(f"SELECT count(*) FROM {scan} WHERE " + " OR ".join(f'"{c}" IS NULL' for c in required)).fetchone()[0]
         out.append(ValidationResult("EXT_REQUIRED_NULL", "PASS" if nulls == 0 else "FAIL", name, int(nulls), "required extension values non-null"))
 
-    dim, po, reaction = (_scan_sql(extension, n) for n in SOURCE_COLUMNS)
+    dim, po, reaction, economics = (_scan_sql(extension, n) for n in SOURCE_COLUMNS)
     products, stores = _scan_sql(walmart, "omni_item_dimensions"), _scan_sql(walmart, "store_dim")
     as_of = str(extension.manifest.get("as_of") or extension.manifest.get("release_as_of") or walmart.manifest.get("as_of"))
     observation_date = con.execute(f"SELECT max(bus_dt) FROM {_scan_sql(walmart, 'store_invt')}").fetchone()[0]
@@ -73,6 +77,16 @@ def validate_extension_data(
            ((SELECT count(*) FROM {reaction} r WHERE r.company_id=d.company_id AND r.effective_from<=DATE '{observation_date}' AND (r.effective_to IS NULL OR r.effective_to>=DATE '{observation_date}') AND r.item_scope_type_cd='brand' AND r.item_scope_id=d.display_brand_id)>1 OR
             ((SELECT count(*) FROM {reaction} r WHERE r.company_id=d.company_id AND r.effective_from<=DATE '{observation_date}' AND (r.effective_to IS NULL OR r.effective_to>=DATE '{observation_date}') AND r.item_scope_type_cd='brand' AND r.item_scope_id=d.display_brand_id)=0 AND
              (SELECT count(*) FROM {reaction} r WHERE r.company_id=d.company_id AND r.effective_from<=DATE '{observation_date}' AND (r.effective_to IS NULL OR r.effective_to>=DATE '{observation_date}') AND r.item_scope_type_cd='all')<>1)))""", "item_reaction_constraint"),
+        ("EXT_ECONOMICS_DOMAIN", f"SELECT count(*) FROM {economics} WHERE company_id<>'MIRO_TOYS' OR currency_code<>'USD' OR unit_cost_amount<0 OR effective_to<effective_from", "company_item_economics"),
+        ("EXT_ECONOMICS_REFERENCE", f"SELECT count(*) FROM {economics} e LEFT JOIN {dim} d USING(company_id,company_item_id) WHERE d.company_item_id IS NULL", "company_item_economics"),
+        ("EXT_ECONOMICS_OVERLAP", f"""SELECT count(*) FROM {economics} a JOIN {economics} b
+          ON a.company_id=b.company_id AND a.company_item_id=b.company_item_id
+         AND (a.effective_from<b.effective_from OR (a.effective_from=b.effective_from AND coalesce(a.effective_to,DATE '9999-12-31')<coalesce(b.effective_to,DATE '9999-12-31')))
+         AND a.effective_from<=coalesce(b.effective_to,DATE '9999-12-31')
+         AND b.effective_from<=coalesce(a.effective_to,DATE '9999-12-31')""", "company_item_economics"),
+        ("EXT_ECONOMICS_RESOLUTION", f"""SELECT count(*) FROM {dim} d WHERE
+          (SELECT count(*) FROM {economics} e WHERE e.company_id=d.company_id AND e.company_item_id=d.company_item_id
+           AND e.effective_from<=DATE '{observation_date}' AND (e.effective_to IS NULL OR e.effective_to>=DATE '{observation_date}'))<>1""", "company_item_economics"),
     ]
     for rule, sql, dataset in checks:
         count = con.execute(sql).fetchone()[0]
@@ -113,6 +127,7 @@ def canonicalize_extension(con: duckdb.DuckDBPyConnection, source: SourceInvento
         "company_item": f"SELECT company_id::VARCHAR company_id,company_item_id::VARCHAR company_item_id,company_item_name::VARCHAR company_item_name,display_brand_id::VARCHAR display_brand_id,{product_id}::VARCHAR product_id,op_cmpny_cd::VARCHAR source_company_id,wm_item_nbr::VARCHAR source_product_id,effective_from::DATE effective_from,effective_to::DATE effective_to FROM {s('dim_item')} ORDER BY company_id,company_item_id",
         "replenishment_commitment": f"SELECT retailer_order_id::VARCHAR retailer_order_id,order_line_nbr::INTEGER order_line_number,event_version::INTEGER event_version,{location_id}::VARCHAR location_id,{product_id}::VARCHAR product_id,ordered_qty::BIGINT ordered_quantity,invoiced_qty::BIGINT invoiced_quantity,received_qty::BIGINT received_quantity,order_created_at::TIMESTAMPTZ order_created_at,approved_to_ship_at::TIMESTAMPTZ approved_to_ship_at,dc_invoiced_at::TIMESTAMPTZ dc_invoiced_at,expected_store_receipt_date::DATE expected_store_receipt_date,actual_store_receipt_at::TIMESTAMPTZ actual_store_receipt_at,status_cd::VARCHAR status_code,known_at::TIMESTAMPTZ known_at FROM {s('retailer_replenishment_commitment')} ORDER BY retailer_order_id,order_line_nbr,event_version",
         "reaction_constraint": f"SELECT company_id::VARCHAR company_id,item_scope_type_cd::VARCHAR item_scope_type_code,item_scope_id::VARCHAR item_scope_id,minimum_reaction_days::INTEGER minimum_reaction_days,effective_from::DATE effective_from,effective_to::DATE effective_to FROM {s('item_reaction_constraint')} ORDER BY company_id,item_scope_type_cd,item_scope_id,effective_from",
+        "company_item_economics": f"SELECT company_id::VARCHAR company_id,company_item_id::VARCHAR company_item_id,currency_code::VARCHAR currency_code,unit_cost_amount::DECIMAL(20,2) unit_cost_amount,effective_from::DATE effective_from,effective_to::DATE effective_to FROM {s('company_item_economics')} ORDER BY company_id,company_item_id,effective_from",
     }
     for table, query in queries.items():
         folder = root / table

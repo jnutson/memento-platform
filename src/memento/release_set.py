@@ -16,13 +16,13 @@ WALMART_DATASETS = {
     "store_invt", "long_rng_store_dmd_frcst",
 }
 EXTENSION_DATASETS = {
-    "dim_item", "retailer_replenishment_commitment", "item_reaction_constraint",
+    "dim_item", "retailer_replenishment_commitment", "item_reaction_constraint", "company_item_economics",
 }
 EXPECTED_CONTRACT_VERSIONS = {
-    "product": "miro-oos-product-v1.6.0",
-    "metrics": "miro-oos-metrics-v1.6.0",
-    "data_scope": "miro-oos-data-scope-v1.6.0",
-    "glossary": "memento-glossary-v1.3.0",
+    "product": "memento-signal-product-v1.0.0",
+    "metrics": "memento-signal-metrics-v1.0.0",
+    "data_scope": "memento-signal-data-scope-v1.0.0",
+    "glossary": "memento-glossary-v1.4.0",
 }
 RELEASE_ID = re.compile(r"^[0-9a-f]{16}-[0-9]{8}T[0-9]{6}Z$")
 
@@ -159,7 +159,7 @@ def validate_release_set(inventory: ReleaseSetInventory, *, now: datetime | None
     wm_names = {d.get("dataset_name") for d in wm.get("datasets", []) if isinstance(d, dict)}
     ext_names = {d.get("dataset_name") for d in ext.get("datasets", []) if isinstance(d, dict)}
     check(wm_names == WALMART_DATASETS, "SET_WALMART_DATASETS", "exact six Walmart datasets")
-    check(ext_names == EXTENSION_DATASETS, "SET_EXTENSION_DATASETS", "exact three Miro datasets")
+    check(ext_names == EXTENSION_DATASETS, "SET_EXTENSION_DATASETS", "exact four Miro datasets")
     check(wm.get("dataset_type") == "observable", "SET_WALMART_OBSERVABLE", "Walmart package is observable")
     check(isinstance(ext.get("po_retention_days"), int) and ext.get("po_retention_days") == 56, "SET_PO_RETENTION", "declared 56-day PO retention")
     try:

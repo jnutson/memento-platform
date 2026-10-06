@@ -81,11 +81,13 @@ def _extension_canonical_validation(con: duckdb.DuckDBPyConnection, candidate: P
         "company_item": "company_id,company_item_id",
         "replenishment_commitment": "retailer_order_id,order_line_number,event_version",
         "reaction_constraint": "company_id,item_scope_type_code,item_scope_id,effective_from",
+        "company_item_economics": "company_id,company_item_id,effective_from",
     }
     required = {
         "company_item": {"company_id", "company_item_id", "company_item_name", "display_brand_id", "product_id", "source_company_id", "source_product_id", "effective_from"},
         "replenishment_commitment": {"retailer_order_id", "order_line_number", "event_version", "location_id", "product_id", "ordered_quantity", "invoiced_quantity", "received_quantity", "order_created_at", "status_code", "known_at"},
         "reaction_constraint": {"company_id", "item_scope_type_code", "item_scope_id", "minimum_reaction_days", "effective_from"},
+        "company_item_economics": {"company_id", "company_item_id", "currency_code", "unit_cost_amount", "effective_from"},
     }
     for table, pk in keys.items():
         scan = "read_parquet('" + str(candidate / table / "*.parquet").replace("'", "''") + "')"
@@ -101,6 +103,8 @@ def _extension_canonical_validation(con: duckdb.DuckDBPyConnection, candidate: P
     for table in ("company_item", "replenishment_commitment"):
         count = con.execute(f"SELECT count(*) FROM {base(table)} x LEFT JOIN {base('product')} p USING(product_id) " + (f"LEFT JOIN {base('location')} l USING(location_id) " if table == "replenishment_commitment" else "") + "WHERE p.product_id IS NULL" + (" OR l.location_id IS NULL" if table == "replenishment_commitment" else "")).fetchone()[0]
         out.append(ValidationResult("CAN_REFERENCES", "PASS" if count == 0 else "FAIL", table, int(count), "canonical references resolve"))
+    economics_count = con.execute(f"SELECT count(*) FROM {base('company_item_economics')} e LEFT JOIN {base('company_item')} i USING(company_id,company_item_id) WHERE i.company_item_id IS NULL").fetchone()[0]
+    out.append(ValidationResult("CAN_REFERENCES", "PASS" if economics_count == 0 else "FAIL", "company_item_economics", int(economics_count), "canonical economics references resolve"))
     return out
 
 
@@ -139,7 +143,7 @@ def ingest_release_set(manifest_path: Path, *, data_root: Path, classification: 
                 and sha256_file(published / entry["path"]) == entry["sha256"]
                 for entry in existing.get("files", [])
             )
-            if not intact or len(existing.get("files", [])) != 9:
+            if not intact or len(existing.get("files", [])) != 10:
                 raise IngestionFailure("published_validation", [ValidationResult("PUB_IMMUTABLE_INTACT", "FAIL", count=1, summary="published dataset differs from its manifest")])
             return published
         canonicalize(con, source.walmart, candidate)
@@ -173,7 +177,7 @@ def ingest_release_set(manifest_path: Path, *, data_root: Path, classification: 
         (candidate / "manifest.json").write_bytes(canonical_json(content))
         (root / "canonical").mkdir(parents=True, exist_ok=True)
         os.rename(candidate, published)
-        LOG.info("event=published dataset_id=%s tables=9", dataset_id)
+        LOG.info("event=published dataset_id=%s tables=10", dataset_id)
         return published
     except Exception:
         summary = root / "quarantine" / run_id / "validation-summary.json"

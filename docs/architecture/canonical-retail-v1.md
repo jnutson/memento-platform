@@ -1,7 +1,7 @@
 # Canonical Retail Contract V1
 
 Status: accepted design contract for the ingestion MVP
-Contract version: `memento-retail-v1`
+Contract version: `memento-retail-v1.1`
 Physical format: Parquet queried with DuckDB
 
 ## Purpose
@@ -13,6 +13,11 @@ tables rather than retailer column names.
 The contract preserves source grain, uses deterministic identifiers, and keeps
 dataset lineage in the release manifest rather than duplicating it on every fact row.
 All columns are required unless explicitly marked nullable.
+
+V1.1 adds the physically distinct `company_item_economics` canonical dataset with
+`company_id`, `company_item_id`, `currency_code`, `unit_cost_amount`, `effective_from`,
+and nullable `effective_to`. Publication fails on missing, overlapping, negative,
+non-USD, or unmapped effective rows. It is never joined into raw retailer facts.
 
 ## Type conventions
 

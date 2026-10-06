@@ -23,6 +23,7 @@ memento-ingest = "memento.cli:main"
 memento-predict = "memento.prediction_cli:main"
 memento-evaluate = "memento.evaluation_cli:main"
 memento-serve = "memento.api_cli:main"
+memento-signal = "memento.signal_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

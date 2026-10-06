@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 import uvicorn
@@ -9,7 +10,7 @@ import uvicorn
 from conftest import build_attention_release_set
 from memento.api import create_app
 from memento.orchestrator import ingest
-from memento.prediction import run_predictions
+from memento.signals import run_signals
 
 
 def main() -> None:
@@ -29,7 +30,12 @@ def main() -> None:
             data_root=data_root,
             classification="synthetic",
         )
-        run_predictions(canonical_path, data_root=data_root)
+        run_signals(
+            canonical_path,
+            data_root=data_root,
+            annual_carrying_cost_rate=Decimal("0.20"),
+            carrying_rate_version="synthetic-browser-test-rate-v1",
+        )
         uvicorn.run(
             create_app(data_root),
             host=args.host,

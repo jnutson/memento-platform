@@ -1,10 +1,10 @@
-# Memento Analytics Demo
+# Memento Signal Demo
 
-This repository contains the local deterministic data path for the focused Miro Toys
-out-of-stock prediction MVP. It accepts an atomic Walmart-plus-Miro release set,
-publishes nine canonical DuckDB-queryable Parquet datasets, and produces an immutable
-daily queue ranked by lost-sales impact, reaction time, and confidence. The historical
-standalone six-dataset Walmart adapter remains supported.
+This repository contains the deterministic Memento Signal path for Miro Toys. It
+publishes ten canonical DuckDB-queryable Parquet datasets and one immutable queue of
+Availability Risk, Demand Momentum Gap, and Inventory Imbalance Exposure signals.
+Signals retain native economics while type-relative impact, reaction time, and
+confidence provide a common rank. The legacy OOS artifact remains readable.
 
 ```bash
 python -m venv .venv
@@ -14,6 +14,10 @@ python -m venv .venv
 
 .venv/bin/memento-predict /absolute/path/to/data/canonical/<dataset-id> \
   --data-root data
+
+.venv/bin/memento-signal /absolute/path/to/data/canonical/<dataset-id> \
+  --data-root data --annual-carrying-cost-rate <approved-rate> \
+  --carrying-rate-version <approved-version>
 
 .venv/bin/memento-evaluate /absolute/path/to/data/predictions/<prediction-set-id> \
   /absolute/path/to/data/canonical/<later-dataset-id> --data-root data
@@ -31,9 +35,17 @@ the new set. API code can use `memento.serving.PredictionStore` to retrieve the 
 run, top-ten queue, and calculation evidence without scanning raw retail facts or
 introducing another database.
 
-## Attention interface
+Signal execution is split into narrow stages: `orchestrator.py` owns source validation
+and canonical publication; `availability_signal.py`, `demand_signal.py`, and
+`inventory_signal.py` independently produce unranked candidates and evidence;
+`signal_ranking.py` assigns type-relative and overall ranks; and
+`signal_publication.py` atomically publishes the ranked set. `signals.py` only prepares
+cutoff-safe canonical inputs and coordinates those stages. Serving reads published
+artifacts and never invokes metric or ranking code.
 
-The `web/` application is the single-pane interactive Attention workflow. It consumes
+## Memento Signal interface
+
+The `web/` application is the single-pane Memento Signal workflow. It consumes
 the immutable queue through a local FastAPI adapter; Python response models enforce the
 server contract and frontend Zod schemas validate every JSON payload before it reaches
 React.
@@ -48,7 +60,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3000/attention`. Next.js proxies same-origin `/api/attention`
+Open `http://127.0.0.1:3000/signal`. Next.js proxies same-origin `/api/signals`
 requests to the loopback service at `http://127.0.0.1:8000`; override the service origin
 with `MEMENTO_API_ORIGIN` when needed. The API is read-only and does not recompute ranks,
 scores, sensitivity paths, or recommendations.
@@ -72,12 +84,9 @@ tests and the browser workflow tests in `web/tests/e2e`.
 
 ## Product direction
 
-The focused product milestone has one capability: predict when a scoped Walmart
-store-item will go out of stock and rank eligible predictions by estimated lost retail
-sales, remaining reaction time, and prediction confidence for **Miro Toys**. Interactive
-scenario planning and secondary insights are deferred. The initial model uses only
-interpretable deterministic equations and low/base/high WAPE sensitivity paths—no
-Monte Carlo simulation or black-box model. See:
+The focused product milestone publishes three deterministic signals without execution
+controls, editable scenarios, probability claims, Monte Carlo simulation, or black-box
+models. See:
 
 - [`docs/product/mvp-product-shape.md`](docs/product/mvp-product-shape.md) for the
   end-state MVP requirements, metric contracts, ranking formula, and acceptance tests.

@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_EVEN
 from itertools import groupby
@@ -92,8 +92,8 @@ def _require_canonical(root: Path) -> dict[str, object]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     required = {"calendar_day", "location", "product", "sales_daily", "inventory_daily", "demand_forecast_weekly", "company_item", "replenishment_commitment", "reaction_constraint"}
     present = {entry["path"].split("/", 1)[0] for entry in manifest.get("files", [])}
-    if present != required:
-        raise IngestionFailure("prediction_validation", [ValidationResult("PRED_CANONICAL_DATASETS", "FAIL", count=1, summary="exact nine canonical datasets required")])
+    if present not in (required, required | {"company_item_economics"}):
+        raise IngestionFailure("prediction_validation", [ValidationResult("PRED_CANONICAL_DATASETS", "FAIL", count=1, summary="exact legacy nine or signal ten canonical datasets required")])
     for entry in manifest["files"]:
         file = root / entry["path"]
         if not file.is_file() or file.is_symlink() or file.stat().st_size != entry["bytes"] or sha256_file(file) != entry["sha256"]:
@@ -300,10 +300,11 @@ def run_predictions(canonical_root: Path, *, data_root: Path) -> Path:
         item_ids = dict(con.execute("SELECT product_id,company_item_id FROM scoped").fetchall())
         calendar_values = {row[0]: (int(row[1]), int(row[2])) for row in con.execute("SELECT calendar_date,retail_year_week,calendar_weekday_number FROM calendar_day WHERE calendar_date BETWEEN ? AND ?", [horizon[0], horizon[-1]]).fetchall()}
 
-        candidates = []; evidence_by_id = {}; forecasts = []
+        candidates = []; evidence_by_id = {}; forecasts = []; reason_codes = []
         for location, product, on_hand, price, assorted, replenishable, location_status in observation_rows:
             key = (location, product)
             if on_hand < 0 or price is None or price < 0 or not assorted or not replenishable or location_status not in {"O", "OPEN", "Open"}:
+                reason_codes.append("availability_invalid_observation")
                 continue
             bias, fallback = _choose_bias(key, product, pairs_by_key, raw_item_stats, raw_brand_stats)
             wape = _choose_wape(key, product, frozen_by_key, frozen_item_stats, frozen_brand_stats)
@@ -326,6 +327,7 @@ def run_predictions(canonical_root: Path, *, data_root: Path) -> Path:
                     missing = True; break
                 daily_base.append(retailer * bias * shares[calendar_value[1] - 1])
             if missing:
+                reason_codes.append("availability_missing_forward_horizon")
                 continue
             for week, retailer in sorted(future_by_key[key].items()):
                 forecasts.append({"prediction_as_of": as_of, "store_id": location, "product_id": product, "target_retail_year_week": week, "retailer_forecast_units": _decimal(retailer, 6), "forecast_bias_factor": _decimal(bias, 6), "memento_weekly_demand_base": _decimal(retailer * bias, 6), "forecast_wape": _decimal(wape, 6) if wape is not None else None, "fallback_level": fallback})
@@ -336,14 +338,17 @@ def run_predictions(canonical_root: Path, *, data_root: Path) -> Path:
             trace, oos = project_inventory(float(on_hand), horizon, paths, inbound_by_key[key])
             predicted = oos["base"]
             if predicted is None:
+                reason_codes.append("availability_no_base_oos")
                 continue
             base_lost = sum(row.lost_units for row in trace if row.path == "base")
             lost_sales = base_lost * float(price)
             if lost_sales <= 0:
+                reason_codes.append("availability_no_lost_sales")
                 continue
             sales_days, inventory_days = coverage.get(key, (0, 0))
             completeness = data_completeness(sales_days, 56, inventory_days, 56, len(pairs_by_key.get(key, [])), reconciliation.get(key, 1.0))
             if completeness < 0.50:
+                reason_codes.append("availability_insufficient_completeness")
                 continue
             minimum_reaction = reaction.get(("item", item_ids[product]), reaction.get(("brand", "MIRO_SPARK"), all_reaction))
             if minimum_reaction is None:
@@ -374,7 +379,7 @@ def run_predictions(canonical_root: Path, *, data_root: Path) -> Path:
             table = pa.Table.from_pylist(rows, schema=schema)
             pq.write_table(table, path, compression="zstd", row_group_size=122_880)
             files.append({"path": name, "bytes": path.stat().st_size, "sha256": sha256_file(path), "rows": table.num_rows})
-        manifest = {"prediction_set_id": prediction_set_id, **identity, "prediction_as_of": source_manifest["as_of"], "prediction_date": observation_date.isoformat(), "source_release_set_id": source_manifest["source_release_set_id"], "source_release_set_manifest_sha256": source_manifest.get("source_release_set_manifest_sha256"), "source_release_ids": source_manifest["source_release_ids"], "source_manifests": source_manifest["source_manifests"], "candidate_count": len(candidates), "display_count": min(len(candidates), 10), "files": files}
+        manifest = {"prediction_set_id": prediction_set_id, **identity, "prediction_as_of": source_manifest["as_of"], "prediction_date": observation_date.isoformat(), "source_release_set_id": source_manifest["source_release_set_id"], "source_release_set_manifest_sha256": source_manifest.get("source_release_set_manifest_sha256"), "source_release_ids": source_manifest["source_release_ids"], "source_manifests": source_manifest["source_manifests"], "candidate_count": len(candidates), "display_count": min(len(candidates), 10), "reason_code_counts": dict(sorted(Counter(reason_codes).items())), "files": files}
         (stage / "manifest.json").write_bytes(canonical_json(manifest))
         published.parent.mkdir(parents=True, exist_ok=True)
         os.rename(stage, published)

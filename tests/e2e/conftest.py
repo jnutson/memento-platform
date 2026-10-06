@@ -13,10 +13,10 @@ AS_OF = "2027-01-30T12:00:00Z"
 CONFIGURATION_HASH = "a" * 64
 SCHEMA_CHECKSUM = "0" * 64
 CONTRACT_VERSIONS = {
-    "product": "miro-oos-product-v1.6.0",
-    "metrics": "miro-oos-metrics-v1.6.0",
-    "data_scope": "miro-oos-data-scope-v1.6.0",
-    "glossary": "memento-glossary-v1.3.0",
+    "product": "memento-signal-product-v1.0.0",
+    "metrics": "memento-signal-metrics-v1.0.0",
+    "data_scope": "memento-signal-data-scope-v1.0.0",
+    "glossary": "memento-glossary-v1.4.0",
 }
 
 
@@ -249,11 +249,20 @@ def _write_extension_package(release_root: Path, source_manifest: dict[str, obje
                     DATE '2025-01-01' effective_from,
                     NULL::DATE effective_to
             """,
+            "company_item_economics": """
+                SELECT 'MIRO_TOYS'::VARCHAR company_id,
+                    'MIRO-SPARK-001'::VARCHAR company_item_id,
+                    'USD'::VARCHAR currency_code,
+                    4.00::DECIMAL(20,2) unit_cost_amount,
+                    DATE '2025-01-01' effective_from,
+                    NULL::DATE effective_to
+            """,
         }
         primary_keys = {
             "dim_item": ["company_id", "company_item_id"],
             "retailer_replenishment_commitment": ["retailer_order_id", "order_line_nbr", "event_version"],
             "item_reaction_constraint": ["company_id", "item_scope_type_cd", "item_scope_id", "effective_from"],
+            "company_item_economics": ["company_id", "company_item_id", "effective_from"],
         }
         datasets: list[dict[str, object]] = []
         for name, query in queries.items():
@@ -273,7 +282,7 @@ def _write_extension_package(release_root: Path, source_manifest: dict[str, obje
         connection.close()
 
     manifest = {
-        "checks": {"three_datasets_only": True, "cutoff_safe": True},
+        "checks": {"four_datasets_only": True, "cutoff_safe": True},
         "configuration_hash": CONFIGURATION_HASH,
         "contract_versions": CONTRACT_VERSIONS,
         "datasets": datasets,
