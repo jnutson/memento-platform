@@ -106,23 +106,17 @@ def build_readiness(
     if not changed:
         raise DeliveryError("branch has no changed paths")
     if verification == "no-db" and any(
-        path.startswith(("src/", "tests/", "web/")) for path in changed
+        path.startswith(("src/", "tests/")) for path in changed
     ):
         raise DeliveryError("changed paths require VERIFICATION=full")
-    command = [MAKE, "verify"] if verification == "full" else [MAKE, "typecheck", "lint", "test-web", "build"]
+    command = [MAKE, "verify"] if verification == "full" else [MAKE, "test-python"]
     result = subprocess.run(command, cwd=root, check=False)
     if result.returncode:
         raise DeliveryError(f"{' '.join(command)} failed with exit code {result.returncode}")
     if not worktree_is_clean(root):
         raise DeliveryError("verification changed the worktree")
     checks = {
-        "python_tests": "passed" if verification == "full" else "not_applicable_by_path",
-        "typecheck": "passed",
-        "lint": "passed",
-        "frontend_tests": "passed",
-        "build": "passed",
-        "browser_e2e": "passed" if verification == "full" else "not_applicable_by_path",
-        "fullstack_e2e": "passed" if verification == "full" else "not_applicable_by_path",
+        "python_tests": "passed",
     }
     receipt = ReadinessReceipt(
         status="ready", branch=branch, head=head, base=base,

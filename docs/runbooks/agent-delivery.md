@@ -46,8 +46,7 @@ Review is a separate operator action. Invoke `$reviewer` explicitly when
 an independent review-and-correction pass is wanted. The reviewer owns concrete
 findings, associated fixes, re-review, and verification. The builder does not conduct
 self-review, start, queue, or wait for review. The review skill does not launch a
-daemon, wrapper, model subprocess, or retry loop. See
-[user-invoked review](../../tools/review/README.md).
+daemon, wrapper, model subprocess, or retry loop.
 
 ## Production boundary
 
@@ -58,36 +57,6 @@ and disallow bypass/direct pushes (including the owner). Do not require a second
 human approval for the solo operator. Confirm the rule is *active* and actually
 targets `main` with a disposable PR before relying on it. This protects CI/PR
 review; it does not turn a local skill invocation into a required GitHub check.
-The operator separately approves production migration and deployment. All Vercel
-deployments for this repo are manual: `apps/web/vercel.json` sets
-`git.deploymentEnabled` to `false`, so a push or merge must not create a Preview or
-Production deployment. To request a Preview, run `vercel deploy` from the linked
-`apps/web` project checkout; to release an approved `main` commit after any approved
-production migration, run `vercel deploy --prod` from that checkout. Confirm the
-deployment's commit and target in Vercel before smoke testing. Before the manual
-release, fetch `origin/main`, check out the approved main commit in a clean linked
-worktree, and run `make release-commit-check APPROVED_SHA=<full-approved-commit-sha>`.
-This is only a local identity check: it compares HEAD, the supplied approved SHA,
-and fetched `origin/main`. It does not establish READY/review history, grant release
-approval, prove that the remote ref is fresh, or prove what Vercel deployed. Confirm
-the draft PR's READY evidence, any explicitly requested review, and approved merge
-before this step; obtain
-separate operator deployment approval, then verify the remote main SHA and resulting
-Vercel deployment identity. Never make the manual
-deployment a push-triggered CI job. Do not treat repository commands as evidence of
-GitHub branch protection or live Vercel settings; verify that the first push with
-this configuration produced no automatic deployment before relying on it.
-After an approved deployment, use an existing Access session in
-`MEMENTO_SMOKE_COOKIE` or `MEMENTO_SMOKE_AUTHORIZATION` and run:
-
-```bash
-make smoke-production BASE_URL=https://protected.example \
-  ORIGIN_URL=https://direct-origin.example DEPLOYMENT_ID=<id> \
-  DB_ROUTE=/attention FEATURE_ROUTE=/new-feature APP_MARKER=Memento
-```
-
-Use actual deployed values, not the placeholders. The command follows no redirect,
-tests direct-origin denial and authenticated app/DB/feature reads, and writes ignored
-`.memento/delivery/smoke.json`. It stores statuses and rollback advice, never response
-bodies or session secrets. On failure, hold rollout and ask for rollback approval;
-the command cannot roll back.
+The operator separately approves any production migration or deployment. This
+repository currently has no deployable frontend and no automated production-release
+workflow; the supported demo surface is the local read-only API.

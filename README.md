@@ -45,42 +45,25 @@ artifacts and never invokes metric or ranking code.
 
 ## Memento Signal interface
 
-The `web/` application is the single-pane Memento Signal workflow. It consumes
-the immutable queue through a local FastAPI adapter; Python response models enforce the
-server contract and frontend Zod schemas validate every JSON payload before it reaches
-React.
-
-Run the API and frontend in separate terminals after publishing a prediction set:
+The supported local interface is the read-only FastAPI adapter. Python response models
+enforce the contract, and serving never recomputes ranks, scores, sensitivity paths, or
+recommendations. Start it after publishing prediction and signal sets:
 
 ```bash
 .venv/bin/memento-serve --data-root data
-
-cd web
-npm install
-npm run dev
 ```
 
-Open `http://127.0.0.1:3000/signal`. Next.js proxies same-origin `/api/signals`
-requests to the loopback service at `http://127.0.0.1:8000`; override the service origin
-with `MEMENTO_API_ORIGIN` when needed. The API is read-only and does not recompute ranks,
-scores, sensitivity paths, or recommendations.
+The service binds to `http://127.0.0.1:8000` by default and exposes `/healthz`,
+`/v1/attention`, and `/v1/signals` endpoints.
 
-Frontend verification commands are `npm run typecheck`, `npm run lint`, `npm test`,
-`npm run build`, and `npm run test:e2e`. The Playwright workflow uses minimized route
-fixtures; Python integration tests cover the live Parquet-to-HTTP boundary.
-
-From the repository root, `make verify` runs the complete merge gate: Python tests,
-frontend typechecking, linting, unit tests, production build, mocked-browser workflow,
-and the full browser-to-API-to-Parquet workflow. GitHub Actions runs the same gate on
+From the repository root, `make verify` runs the complete Python merge gate, including
+the synthetic pipeline and HTTP integration tests. GitHub Actions runs the same gate on
 every pull request and every push to `main`. Use `make setup` to create the local Python
-virtual environment and install the Python and frontend dependencies.
+virtual environment and install its dependencies.
 
 The complete synthetic pipeline can be exercised independently with
-`.venv/bin/pytest tests/e2e` (or `.venv/bin/pytest -m e2e`). From `web/`, run
-`npm run test:e2e:fullstack` to verify the browser, real API, and published Parquet
-artifacts together. See
-[`tests/e2e/README.md`](tests/e2e/README.md) for the boundary between these pipeline
-tests and the browser workflow tests in `web/tests/e2e`.
+`.venv/bin/pytest tests/e2e` (or `.venv/bin/pytest -m e2e`). See
+[`tests/e2e/README.md`](tests/e2e/README.md) for the tested runtime boundary.
 
 ## Product direction
 
@@ -96,5 +79,3 @@ models. See:
   the bounded observable-data scope and ownership boundaries.
 - [`docs/product/memento-glossary.md`](docs/product/memento-glossary.md) for Walmart-
   aligned source and Memento-derived terminology.
-- [`docs/plans/attention-ui-integration.md`](docs/plans/attention-ui-integration.md) for
-  the accepted Attention UI integration scope and verification criteria.
