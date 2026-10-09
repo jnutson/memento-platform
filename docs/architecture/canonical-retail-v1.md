@@ -36,7 +36,9 @@ non-USD, or unmapped effective rows. It is never joined into raw retailer facts.
 
 The Walmart source represents money as floating point. Before conversion, the adapter
 must verify that each value is finite and equals its two-decimal rounding within
-`0.000001`. It may then cast the rounded value to `DECIMAL(20,2)`. A value outside that
+`0.00001`. This tolerance accommodates binary floating-point noise observed in the
+approved synthetic source while remaining far below half a cent. The adapter may then
+cast the rounded value to `DECIMAL(20,2)`. A value outside that
 tolerance or the declared decimal range fails canonicalization; it is not silently
 rounded. Forecast quantities must likewise fit `DECIMAL(20,6)` before conversion.
 

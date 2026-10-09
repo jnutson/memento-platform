@@ -13,3 +13,7 @@ discover only directories below `data/canonical/` containing `manifest.json`.
 Published releases are immutable. An identical manifest and version tuple returns the
 existing directory. Failures write only safe rule/count summaries to quarantine and
 remove staging; source rows never enter logs or exceptions.
+
+DuckDB execution is capped at 2 GB per ingestion connection. Any analytical spill files
+are written beneath that run's ignored staging directory and removed with the rest of
+the run workspace after success or failure.

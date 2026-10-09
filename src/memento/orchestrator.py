@@ -20,6 +20,7 @@ from .walmart import ADAPTER_ID, ADAPTER_VERSION, MAPPING, TRANSFORMATION_VERSIO
 
 LOG = logging.getLogger("memento.ingestion")
 ALLOWED_SOURCE_CLASSIFICATIONS = {"synthetic", "internal"}
+DUCKDB_MEMORY_LIMIT = "2GB"
 
 
 def _ensure_pass(phase: str, results: list[ValidationResult]) -> None:
@@ -40,6 +41,17 @@ def _safe_data_root(root: Path) -> Path:
 def _dataset_id(source_hash: str) -> str:
     identity = {"source_manifest_sha256": source_hash,"adapter": ADAPTER_VERSION,"canonical": CONTRACT_VERSION,"transformation": TRANSFORMATION_VERSION,"validation": VALIDATION_VERSION}
     return "mds_" + hashlib.sha256(canonical_json(identity)).hexdigest()
+
+
+def _configure_analytics_connection(
+    con: duckdb.DuckDBPyConnection, run_root: Path
+) -> None:
+    spill_root = run_root / "duckdb-spill"
+    spill_root.mkdir(parents=True, exist_ok=True)
+    escaped_spill_root = str(spill_root).replace("'", "''")
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    con.execute(f"SET temp_directory = '{escaped_spill_root}'")
+    con.execute("SET preserve_insertion_order=false")
 
 
 def _release_set_dataset_id(identity: bytes) -> str:
@@ -163,7 +175,7 @@ def ingest_release_set(manifest_path: Path, *, data_root: Path, classification: 
         results.extend(validate_release_set(source))
         _ensure_pass("source_validation", results)
         con = duckdb.connect()
-        con.execute("SET preserve_insertion_order=false")
+        _configure_analytics_connection(con, run_root)
         walmart_results = validate_source_data(con, source.walmart)
         extension_results = validate_extension_data(con, source.extension, source.walmart)
         results.extend(walmart_results + extension_results)
@@ -255,7 +267,7 @@ def ingest(manifest_path: Path, *, data_root: Path, classification: str) -> Path
         results.extend(validate_manifest_contract(inventory))
         _ensure_pass("source_validation", results)
         con = duckdb.connect()
-        con.execute("SET preserve_insertion_order=false")
+        _configure_analytics_connection(con, run_root)
         data_results = validate_source_data(con, inventory)
         results.extend(data_results)
         _ensure_pass("source_validation", results)

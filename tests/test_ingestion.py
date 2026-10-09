@@ -6,10 +6,23 @@ import duckdb
 import pytest
 
 from memento.models import IngestionFailure
-from memento.orchestrator import ingest
+from memento.orchestrator import DUCKDB_MEMORY_LIMIT, _configure_analytics_connection, ingest
 
 
 TABLES = {"calendar_day","location","product","sales_daily","inventory_daily","demand_forecast_weekly"}
+
+
+def test_duckdb_runtime_is_memory_bounded_and_spills_inside_staging(tmp_path: Path):
+    con = duckdb.connect()
+    run_root = tmp_path / "data" / "staging" / "run_test"
+
+    _configure_analytics_connection(con, run_root)
+
+    assert DUCKDB_MEMORY_LIMIT == "2GB"
+    assert con.execute("SELECT current_setting('memory_limit')").fetchone()[0] == "1.8 GiB"
+    assert con.execute("SELECT current_setting('temp_directory')").fetchone()[0] == str(
+        run_root / "duckdb-spill"
+    )
 
 
 def _rewrite_source_dataset(manifest_path: Path, dataset: str, query_template: str) -> None:
@@ -42,7 +55,7 @@ def test_valid_release_publishes_six_queryable_tables_and_replays(release_manife
     published = ingest(release_manifest, data_root=data_root, classification="synthetic")
     manifest = json.loads((published / "manifest.json").read_text())
     assert set(manifest["dataset_mapping"].values()) == TABLES
-    assert manifest["validation_contract_version"] == "1.1.0"
+    assert manifest["validation_contract_version"] == "1.1.1"
     assert {f["path"].split("/")[0] for f in manifest["files"]} == TABLES
     assert all(r["severity"] in {"PASS", "WARN"} for r in manifest["validation_results"])
     assert any(r["rule_id"] == "CAN_SCHEMA_EXACT" for r in manifest["validation_results"])
@@ -193,6 +206,37 @@ def test_out_of_range_source_values_are_rejected_before_canonical_casts(
 
     assert rule in {result.rule_id for result in error.value.results if result.severity == "FAIL"}
     assert not (tmp_path/"data"/"canonical").exists()
+
+
+@pytest.mark.parametrize(
+    ("amount", "publishes"),
+    [("2.500009", True), ("2.50002", False)],
+)
+def test_source_money_rounding_tolerance(
+    release_manifest: Path, tmp_path: Path, amount: str, publishes: bool
+):
+    _rewrite_source_dataset(
+        release_manifest,
+        "store_sales",
+        f"SELECT * REPLACE ({amount}::DOUBLE AS ly_sales_amt) FROM {{scan}}",
+    )
+
+    if publishes:
+        assert ingest(
+            release_manifest, data_root=tmp_path / "data", classification="synthetic"
+        ).is_dir()
+    else:
+        with pytest.raises(IngestionFailure) as error:
+            ingest(
+                release_manifest,
+                data_root=tmp_path / "data",
+                classification="synthetic",
+            )
+        assert "SRC_SALES_DOMAIN" in {
+            result.rule_id
+            for result in error.value.results
+            if result.severity == "FAIL"
+        }
 
 
 @pytest.mark.parametrize(
