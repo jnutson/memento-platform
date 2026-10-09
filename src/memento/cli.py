@@ -11,7 +11,7 @@ from .orchestrator import ingest
 def main() -> int:
     parser = argparse.ArgumentParser(description="Publish a Walmart observable release as Memento Retail V1")
     parser.add_argument("manifest", type=Path)
-    parser.add_argument("--classification", required=True, choices=("synthetic", "internal", "confidential-customer"))
+    parser.add_argument("--classification", required=True, choices=("synthetic", "internal"))
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

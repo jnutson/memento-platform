@@ -16,9 +16,10 @@ from .manifest import canonical_json, inspect_manifest, sha256_file, validate_ma
 from .models import IngestionFailure, ValidationResult
 from .miro import MAPPING as MIRO_MAPPING, canonicalize_extension, validate_extension_data
 from .release_set import inspect_release_set, release_set_identity, validate_release_set
-from .walmart import ADAPTER_ID, ADAPTER_VERSION, MAPPING, TRANSFORMATION_VERSION, VALIDATION_VERSION, canonicalize, validate_source_data
+from .walmart import ADAPTER_ID, ADAPTER_VERSION, MAPPING, TRANSFORMATION_VERSION, VALIDATION_VERSION, canonicalize, invalid_iana_timezone_row_count, validate_source_data
 
 LOG = logging.getLogger("memento.ingestion")
+ALLOWED_SOURCE_CLASSIFICATIONS = {"synthetic", "internal"}
 
 
 def _ensure_pass(phase: str, results: list[ValidationResult]) -> None:
@@ -48,6 +49,7 @@ def _release_set_dataset_id(identity: bytes) -> str:
 
 def _canonical_validation(con: duckdb.DuckDBPyConnection, candidate: Path, expected: dict[str, int]) -> list[ValidationResult]:
     out: list[ValidationResult] = []
+    schemas_valid = True
     keys = {
         "calendar_day":"retail_calendar_id,calendar_date", "location":"location_id", "product":"product_id",
         "sales_daily":"business_date,location_id,product_id,retail_type_code,sales_channel_code",
@@ -57,21 +59,52 @@ def _canonical_validation(con: duckdb.DuckDBPyConnection, candidate: Path, expec
     for table, pk in keys.items():
         path = str(candidate / table / "*.parquet").replace("'", "''")
         scan = f"read_parquet('{path}')"
-        description = [(row[0], row[1]) for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()]
-        out.append(ValidationResult("CAN_SCHEMA_EXACT", "PASS" if description == SCHEMAS[table] else "FAIL", table, 0 if description == SCHEMAS[table] else 1, "exact canonical names, order, and types"))
-        required = " OR ".join(f'"{name}" IS NULL' for name, _ in SCHEMAS[table])
-        null_count = con.execute(f"SELECT count(*) FROM {scan} WHERE {required}").fetchone()[0]
-        out.append(ValidationResult("CAN_REQUIRED_NULL", "PASS" if null_count == 0 else "FAIL", table, int(null_count), "required canonical values non-null"))
-        count, dupes = con.execute(f"SELECT count(*),count(*)-count(DISTINCT ({pk})) FROM {scan}").fetchone()
-        want = expected[table]
-        out.append(ValidationResult("CAN_ROW_COUNT", "PASS" if count == want else "FAIL", table, 0 if count == want else 1, "source and canonical row counts reconcile"))
-        out.append(ValidationResult("CAN_PRIMARY_KEY", "PASS" if dupes == 0 else "FAIL", table, int(dupes), "canonical primary key unique"))
+        try:
+            description = [(row[0], row[1]) for row in con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()]
+            exact = description == SCHEMAS[table]
+            out.append(ValidationResult("CAN_SCHEMA_EXACT", "PASS" if exact else "FAIL", table, 0 if exact else 1, "exact canonical names, order, and types"))
+            if not exact:
+                schemas_valid = False
+                continue
+            optional_count = con.execute(f"SELECT count(*) FROM parquet_schema('{path}') WHERE name NOT IN ('duckdb_schema','schema') AND repetition_type <> 'REQUIRED'").fetchone()[0]
+            out.append(ValidationResult("CAN_SCHEMA_REQUIRED", "PASS" if optional_count == 0 else "FAIL", table, int(optional_count), "canonical Parquet fields required"))
+            required = " OR ".join(f'"{name}" IS NULL' for name, _ in SCHEMAS[table])
+            null_count = con.execute(f"SELECT count(*) FROM {scan} WHERE {required}").fetchone()[0]
+            out.append(ValidationResult("CAN_REQUIRED_NULL", "PASS" if null_count == 0 else "FAIL", table, int(null_count), "required canonical values non-null"))
+            count, dupes = con.execute(f"SELECT count(*),count(*)-count(DISTINCT ({pk})) FROM {scan}").fetchone()
+            want = expected[table]
+            out.append(ValidationResult("CAN_ROW_COUNT", "PASS" if count == want else "FAIL", table, 0 if count == want else 1, "source and canonical row counts reconcile"))
+            out.append(ValidationResult("CAN_PRIMARY_KEY", "PASS" if dupes == 0 else "FAIL", table, int(dupes), "canonical primary key unique"))
+        except duckdb.Error:
+            schemas_valid = False
+            out.append(ValidationResult("CAN_PARQUET_READ", "FAIL", table, 1, "canonical Parquet dataset cannot be read"))
+    if not schemas_valid:
+        return out
     base = lambda t: "read_parquet('" + str(candidate / t / "*.parquet").replace("'", "''") + "')"
     for table in ("sales_daily", "inventory_daily"):
         count = con.execute(f"SELECT count(*) FROM {base(table)} f LEFT JOIN {base('calendar_day')} c ON f.business_date=c.calendar_date AND f.retail_year_week=c.retail_year_week LEFT JOIN {base('location')} l USING(location_id) LEFT JOIN {base('product')} p USING(product_id) WHERE c.calendar_date IS NULL OR l.location_id IS NULL OR p.product_id IS NULL").fetchone()[0]
         out.append(ValidationResult("CAN_REFERENCES", "PASS" if count == 0 else "FAIL", table, int(count), "canonical references resolve"))
     count = con.execute(f"SELECT count(*) FROM {base('demand_forecast_weekly')} f LEFT JOIN (SELECT DISTINCT retail_year_week FROM {base('calendar_day')}) c ON f.target_retail_year_week=c.retail_year_week LEFT JOIN {base('location')} l USING(location_id) LEFT JOIN {base('product')} p USING(product_id) WHERE c.retail_year_week IS NULL OR l.location_id IS NULL OR p.product_id IS NULL OR f.forecast_created_retail_year_week>=f.target_retail_year_week OR f.forecast_created_retail_year_week%100 NOT BETWEEN 1 AND 53").fetchone()[0]
-    out.append(ValidationResult("CAN_REFERENCES", "PASS" if count == 0 else "FAIL", "demand_forecast_weekly", int(count), "canonical target references and forecast ordering valid"))
+    out.append(ValidationResult("CAN_REFERENCES", "PASS" if count == 0 else "FAIL", "demand_forecast_weekly", int(count), "canonical references and ordering valid"))
+
+    semantic_checks = [
+        ("CAN_CALENDAR_RULES", "calendar_day", f"SELECT count(*) FROM {base('calendar_day')} WHERE retail_calendar_id <> 'walmart-us-454' OR calendar_day_of_month NOT BETWEEN 1 AND 31 OR calendar_day_of_month <> day(calendar_date) OR calendar_weekday_number NOT BETWEEN 1 AND 7 OR calendar_month_number NOT BETWEEN 1 AND 12 OR calendar_month_number <> month(calendar_date) OR calendar_quarter_number NOT BETWEEN 1 AND 4 OR calendar_quarter_number <> quarter(calendar_date) OR calendar_year NOT BETWEEN 1000 AND 9999 OR calendar_year <> year(calendar_date) OR retail_week_number NOT BETWEEN 1 AND 53 OR retail_month_number NOT BETWEEN 1 AND 12 OR retail_quarter_number NOT BETWEEN 1 AND 4 OR retail_year NOT BETWEEN 1000 AND 9999 OR retail_year_week <> retail_year::INTEGER*100+retail_week_number OR comparable_retail_year_week NOT BETWEEN 100001 AND 999953 OR comparable_retail_year_week % 100 NOT BETWEEN 1 AND 53"),
+        ("CAN_LOCATION_RULES", "location", f"SELECT count(*) FROM {base('location')} WHERE source_system <> 'walmart' OR source_company_id <> '0' OR country_code <> 'US' OR NOT isfinite(latitude) OR NOT isfinite(longitude) OR latitude NOT BETWEEN -90 AND 90 OR longitude NOT BETWEEN -180 AND 180"),
+        ("CAN_PRODUCT_RULES", "product", f"SELECT count(*) FROM {base('product')} WHERE source_system <> 'walmart' OR currency_code <> 'USD' OR base_unit_retail_amount < 0"),
+        ("CAN_SALES_DOMAIN", "sales_daily", f"SELECT count(*) FROM {base('sales_daily')} WHERE retail_calendar_id <> 'walmart-us-454' OR retail_type_code NOT IN ('regular','rollback','clearance') OR sales_channel_code <> 'BIS' OR currency_code <> 'USD'"),
+        ("CAN_INVENTORY_DOMAIN", "inventory_daily", f"SELECT count(*) FROM {base('inventory_daily')} WHERE retail_calendar_id <> 'walmart-us-454' OR currency_code <> 'USD' OR on_hand_retail_amount < 0 OR source_comparison_on_hand_retail_amount < 0 OR current_unit_retail_amount < 0"),
+        ("CAN_FORECAST_DOMAIN", "demand_forecast_weekly", f"SELECT count(*) FROM {base('demand_forecast_weekly')} WHERE retail_calendar_id <> 'walmart-us-454' OR forecast_quantity < 0 OR forecast_created_retail_year_week >= target_retail_year_week"),
+        ("CAN_STABLE_ID", "location", f"SELECT count(*) FROM {base('location')} WHERE NOT regexp_full_match(source_company_id, '0|[1-9][0-9]*') OR NOT regexp_full_match(source_location_id, '0|[1-9][0-9]*') OR location_id <> 'loc_'||sha256('memento|v1|location|walmart|'||source_company_id||'|'||source_location_id)"),
+        ("CAN_STABLE_ID", "product", f"SELECT count(*) FROM {base('product')} WHERE NOT regexp_full_match(source_company_id, '0|[1-9][0-9]*') OR NOT regexp_full_match(source_product_id, '0|[1-9][0-9]*') OR product_id <> 'prd_'||sha256('memento|v1|product|walmart|'||source_company_id||'|'||source_product_id)"),
+        ("CAN_CANDIDATE_KEY", "location", f"SELECT count(*)-count(DISTINCT (source_system,source_company_id,source_location_id)) FROM {base('location')}"),
+        ("CAN_CANDIDATE_KEY", "product", f"SELECT count(*)-count(DISTINCT (source_system,source_company_id,source_product_id)) FROM {base('product')}"),
+        ("CAN_UPC_UNIQUE", "product", f"SELECT count(*)-count(DISTINCT upc) FROM {base('product')}"),
+    ]
+    for rule, table, sql in semantic_checks:
+        count = int(con.execute(sql).fetchone()[0])
+        out.append(ValidationResult(rule, "PASS" if count == 0 else "FAIL", table, count, "canonical semantic contract"))
+    timezone_count = invalid_iana_timezone_row_count(con, base("location"), "timezone_name")
+    out.append(ValidationResult("CAN_TIMEZONE_DOMAIN", "PASS" if timezone_count == 0 else "FAIL", "location", timezone_count, "timezone names belong to the IANA database"))
     return out
 
 
@@ -191,6 +224,18 @@ def ingest_release_set(manifest_path: Path, *, data_root: Path, classification: 
 
 
 def ingest(manifest_path: Path, *, data_root: Path, classification: str) -> Path:
+    if classification not in ALLOWED_SOURCE_CLASSIFICATIONS:
+        raise IngestionFailure(
+            "source_validation",
+            [
+                ValidationResult(
+                    "SRC_TRUSTED_CLASSIFICATION",
+                    "FAIL",
+                    count=1,
+                    summary="source classification is not approved for this MVP",
+                )
+            ],
+        )
     try:
         preview = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):

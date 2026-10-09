@@ -37,7 +37,8 @@ non-USD, or unmapped effective rows. It is never joined into raw retailer facts.
 The Walmart source represents money as floating point. Before conversion, the adapter
 must verify that each value is finite and equals its two-decimal rounding within
 `0.000001`. It may then cast the rounded value to `DECIMAL(20,2)`. A value outside that
-tolerance fails canonicalization; it is not silently rounded.
+tolerance or the declared decimal range fails canonicalization; it is not silently
+rounded. Forecast quantities must likewise fit `DECIMAL(20,6)` before conversion.
 
 ## Deterministic identifiers
 
@@ -123,8 +124,13 @@ The redundant source fields `fiscal_*` and `ly_cal_dt` are not published in V1. 
 declared equivalence to the selected calendar concepts must be validated before they
 are dropped.
 
-Required ranges include weekday `1..7`, month `1..12`, quarter `1..4`, and retail week
-`1..53`. `retail_year_week` must equal `retail_year * 100 + retail_week_number`.
+Required ranges include day `1..31`, weekday `1..7`, month `1..12`, quarter `1..4`,
+four-digit calendar and retail years, and retail week `1..53`. `retail_year_week` must
+equal `retail_year * 100 + retail_week_number`.
+The comparable date and week are source-provided external references. They must be
+non-null, the comparable week must have a week component in `1..53`, and the source's
+redundant comparable-date fields must agree. V1 does not require them to resolve within
+this release because its calendar may cover only the active retail year.
 
 ## `location`
 
@@ -134,7 +140,7 @@ Primary key: `location_id`.
 |---|---|---:|---|
 | `location_id` | `VARCHAR` | no | deterministic ID |
 | `source_system` | `VARCHAR` | no | constant `walmart` |
-| `source_company_id` | `VARCHAR` | no | constant `0`; `store_dim` omits company |
+| `source_company_id` | `VARCHAR` | no | lexical `op_cmpny_cd`; V1 requires `0` |
 | `source_location_id` | `VARCHAR` | no | lexical `store_nbr` |
 | `country_code` | `VARCHAR` | no | `geo_region_cd` mapped to `US` |
 | `location_name` | `VARCHAR` | no | `store_nm` |
@@ -156,10 +162,11 @@ Primary key: `location_id`.
 | `source_timezone_code` | `VARCHAR` | no | `tz_cd` |
 | `timezone_name` | `VARCHAR` | no | `tz_nm`; valid IANA name |
 
-Candidate key `(source_system, source_company_id, source_location_id)` must be unique.
+The source key `(op_cmpny_cd, store_nbr)` and canonical candidate key
+`(source_system, source_company_id, source_location_id)` must be unique.
 Latitude must be within `[-90, 90]` and longitude within `[-180, 180]`.
-Every fact row that resolves to this V1 location must have `op_cmpny_cd = 0`; any other
-company value fails validation because `store_dim` cannot disambiguate it.
+All V1 location and fact rows must have `op_cmpny_cd = 0`; any other company value
+fails validation because this adapter version supports only that company domain.
 
 ## `product`
 
@@ -309,6 +316,10 @@ inferred solely from an external manifest.
 - Reordering columns or changing Parquet layout without changing logical content may be
   a transformation-version change.
 - Published V1 datasets are immutable and are never rewritten in place.
+- Each dataset is a complete immutable snapshot selected explicitly by dataset ID.
+  Identical inputs and versions replay to that dataset; newer releases neither merge
+  into nor correct older releases. Cross-release supersession, late-arriving correction,
+  and slowly changing dimension policies require a later approved contract.
 
 ## Required implementation artifacts
 

@@ -137,15 +137,15 @@ data/
   quarantine/<run-id>/validation-summary.json
   canonical/<memento-dataset-id>/manifest.json
   canonical/<memento-dataset-id>/<canonical-table>/
-  metadata/ingestion.db
 ```
 
 For this immutable local release, raw landing may be a sealed reference rather than a
 second 1.5 GB copy. It records the absolute manifest path, manifest hash, release ID,
 file-inventory identity, classification, and receipt time. It never mutates the source.
 
-Use a small local ignored metadata database only if needed to prove restart and replay
-behavior. Do not add Postgres or a Docker service without approval.
+For the MVP, manifests and directory state are the operational control plane. DuckDB
+connections are ephemeral and query Parquet. Add a Dockerized operational database only
+for a later concrete, approved requirement; do not add another datastore speculatively.
 
 ### Publication
 
@@ -177,7 +177,8 @@ Grain: `calendar_date x retail_calendar_id`.
 Required concepts include calendar date/year/quarter/month, retail year/quarter/month/
 week, retail year-week, comparable date, and comparable retail year-week. Use an
 explicit calendar identity such as `walmart-454`; Walmart week numbering is not a
-universal calendar.
+universal calendar. Comparable fields are external source references and need not
+resolve inside a release whose calendar covers only the active retail year.
 
 ### `location`
 

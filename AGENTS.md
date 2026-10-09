@@ -27,8 +27,9 @@ build the ingestion pipeline until a task explicitly asks for it.
   dates, and file paths at system boundaries.
 - Preserve source lineage and ingestion metadata without copying sensitive payloads
   into logs, exceptions, fixtures, or model context.
-- Docker is the local database boundary. DuckDB over Parquet is the analytics engine.
-  Do not introduce another database or analytics engine without approval.
+- DuckDB over Parquet is the analytics engine. If a persistent local operational
+  database is later approved, Docker is its boundary. Do not introduce another
+  database or analytics engine without approval.
 - Keep raw, canonical, and derived data physically and logically distinct.
 - Never mutate source extracts. Derived outputs must be reproducible from declared inputs.
 - Use synthetic, minimized fixtures in tests. Never commit customer or production data.
@@ -64,17 +65,18 @@ possible; otherwise ask for the exact path. Do not search broadly through person
 
 ## Delivery workflow
 
-The `$questions`, `$planner`, `$builder`, and `$no-mistakes-review` skills are
+The `$questions`, `$planner`, `$builder`, and `$reviewer` skills are
 user-invoked only. A normal question, plan, implementation, or review request does not
 implicitly invoke them.
 
 - `$questions`: read-only discovery; no files or state changed.
 - `$planner`: read-only scope and acceptance criteria ending in a builder handoff.
 - `$builder`: implement accepted scope, verify it, and report evidence.
-- `$no-mistakes-review`: independent, findings-first review; never edits the change.
+- `$reviewer`: independently reviews the change, fixes concrete in-scope issues, and
+  verifies the corrected result.
 
 Planning does not implement. Building does not redefine the product outcome. Review
-does not silently repair. A later workflow begins only when the user invokes it.
+does not redefine scope. A later workflow begins only when the user invokes it.
 
 ## Completion standard
 
