@@ -22,4 +22,4 @@ deploy, migrate production, publish, or perform destructive actions without appr
 
 Report the implemented outcome, files changed, checks run and results, unrun checks,
 and any remaining data or production decision. Review is a separate
-`$no-mistakes-review` invocation unless the accepted handoff explicitly requires it.
+`$reviewer` invocation unless the accepted handoff explicitly requires it.

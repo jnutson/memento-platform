@@ -1,0 +1,14 @@
+# Memento Signal Synthetic Data handoff snapshot
+# Prepared: 2026-10-09
+# Memento branch: codex/harden-data-contract
+# Memento base commit: 890d68870f59c5642f37671686ca799cc4613596
+# The Memento working tree was dirty; these content hashes, not the base commit alone,
+# identify the controlling document snapshot.
+fb7623b4e4a2cbbf607b06f4b830310236b4e2e37ea16124304f40926774dc0b  docs/handoffs/synthetic-data-memento-signal-v1.md
+3276d8224471446368fef38352c6759ad0612cc511f6e5a2f70cca2d774924ca  docs/product/mvp-product-shape.md
+7b8d73dbcb3eb77945eaa3297020bad74b2da3c29030b50bf7a0f947715612f7  docs/product/mvp-metric-contract.md
+fe7305bf1a5bf5d2bc92d7a19851e0a448ec9dd6aaf55b5d4ffc41fbb9898f8c  docs/plans/insights-mvp-data-scope.md
+ce48c44a0dee7acb8a92d8a62436fc63ec53a22f20f351175572499b671f0a06  docs/plans/brand-a-three-year-synthetic-run.md
+d74cd5983b94bcfec4f054216483efec460f96ac0e0af27e46bbe4b5b4837e2a  docs/product/memento-glossary.md
+1269f5c3c51217ca629516e2f2113042dc815e0ec8ce60879ba04fb5208c2c2f  /Users/mininutson/Desktop/Synthetic Data/INSIGHTS_MVP_SYNTHETIC_DATA_BUILDER_HANDOFF.md
+056283e7c90d83b338ab8e239b5c2b2f6229cf6da29fc9eb9c8f2e067941a6e5  /Users/mininutson/Desktop/Synthetic Data/config/reference_sources/PSP Glossary.csv

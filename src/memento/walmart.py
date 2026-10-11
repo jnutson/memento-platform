@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
+from zoneinfo import available_timezones
 
 import duckdb
 import pyarrow as pa
@@ -13,7 +15,8 @@ from .models import SourceInventory, ValidationResult
 ADAPTER_ID = "walmart-observable-release-v1"
 ADAPTER_VERSION = "1.0.0"
 TRANSFORMATION_VERSION = "1.0.0"
-VALIDATION_VERSION = "1.0.0"
+VALIDATION_VERSION = "1.1.1"
+MONEY_ROUNDING_TOLERANCE = 0.00001
 RETAIL_TYPE_MAP = {0: "regular", 7: "rollback", 8: "clearance"}
 
 
@@ -55,7 +58,7 @@ LEGACY_SOURCE_TYPES = {
 
 PRIMARY_KEYS = {
     "calendar_dim": ["cal_dt", "geo_region_cd"],
-    "store_dim": ["store_nbr"],
+    "store_dim": ["op_cmpny_cd", "store_nbr"],
     "omni_item_dimensions": ["op_cmpny_cd", "wm_item_nbr"],
     "store_sales": ["bus_dt","geo_region_cd","rpt_cd","store_nbr","svc_chnl_nm","wm_item_nbr"],
     "store_invt": ["bus_dt","op_cmpny_cd","store_nbr","wm_item_nbr"],
@@ -95,39 +98,88 @@ def _stamp_required_parquet(source: Path, target: Path) -> None:
             writer.write_batch(pa.RecordBatch.from_arrays(batch.columns, schema=required))
 
 
+@lru_cache(maxsize=1)
+def _iana_timezone_names() -> frozenset[str]:
+    return frozenset(available_timezones())
+
+
+def is_valid_iana_timezone(name: object) -> bool:
+    return isinstance(name, str) and name in _iana_timezone_names()
+
+
+def invalid_iana_timezone_row_count(
+    con: duckdb.DuckDBPyConnection, scan: str, column: str
+) -> int:
+    counts = con.execute(
+        f'SELECT "{column}", count(*) FROM {scan} GROUP BY "{column}"'
+    ).fetchall()
+    return sum(int(count) for name, count in counts if not is_valid_iana_timezone(name))
+
+
 def validate_source_data(con: duckdb.DuckDBPyConnection, inventory: SourceInventory) -> list[ValidationResult]:
     out: list[ValidationResult] = []
     declared = {d["dataset_name"]: d for d in inventory.manifest["datasets"]}
+    schemas_valid = True
     for name, expected_columns in SOURCE_COLUMNS.items():
         scan = _scan_sql(inventory, name)
         try:
             desc = con.execute(f"DESCRIBE SELECT * FROM {scan}").fetchall()
+            schema = [(row[0], row[1]) for row in desc]
+            expected_schema = list(zip(expected_columns, SOURCE_TYPES[name], strict=True))
+            legacy_schema = list(zip(expected_columns, LEGACY_SOURCE_TYPES[name], strict=True))
+            schema_ok = schema in (expected_schema, legacy_schema)
+            out.append(ValidationResult("SRC_SCHEMA_EXACT", "PASS" if schema_ok else "FAIL", name, 0 if schema_ok else 1, "exact supported physical column and type contract"))
+            if not schema_ok:
+                schemas_valid = False
+                continue
+            count = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
+            out.append(ValidationResult("SRC_ROW_COUNT", "PASS" if count == declared[name]["row_count"] else "FAIL", name, 0 if count == declared[name]["row_count"] else 1, "physical row count reconciles"))
+            pk = ",".join(PRIMARY_KEYS[name])
+            dupes = con.execute(f"SELECT count(*)-count(DISTINCT ({pk})) FROM {scan}").fetchone()[0]
+            out.append(ValidationResult("SRC_PRIMARY_KEY", "PASS" if dupes == 0 else "FAIL", name, int(dupes), "primary key unique"))
+            nulls = con.execute("SELECT count(*) FROM (SELECT * FROM " + scan + ") t WHERE " + " OR ".join(f'"{c}" IS NULL' for c in expected_columns)).fetchone()[0]
+            out.append(ValidationResult("SRC_REQUIRED_NULL", "PASS" if nulls == 0 else "FAIL", name, int(nulls), "required values non-null"))
         except duckdb.Error:
+            schemas_valid = False
             out.append(ValidationResult("SRC_PARQUET_READ", "FAIL", name, 1, "Parquet dataset cannot be read"))
-            continue
-        schema = [(row[0], row[1]) for row in desc]
-        expected_schema = list(zip(expected_columns, SOURCE_TYPES[name], strict=True))
-        legacy_schema = list(zip(expected_columns, LEGACY_SOURCE_TYPES[name], strict=True))
-        schema_ok = schema in (expected_schema, legacy_schema)
-        out.append(ValidationResult("SRC_SCHEMA_EXACT", "PASS" if schema_ok else "FAIL", name, 0 if schema_ok else 1, "exact supported physical column and type contract"))
-        count = con.execute(f"SELECT count(*) FROM {scan}").fetchone()[0]
-        out.append(ValidationResult("SRC_ROW_COUNT", "PASS" if count == declared[name]["row_count"] else "FAIL", name, 0 if count == declared[name]["row_count"] else 1, "physical row count reconciles"))
-        pk = ",".join(PRIMARY_KEYS[name])
-        dupes = con.execute(f"SELECT count(*)-count(DISTINCT ({pk})) FROM {scan}").fetchone()[0]
-        out.append(ValidationResult("SRC_PRIMARY_KEY", "PASS" if dupes == 0 else "FAIL", name, int(dupes), "primary key unique"))
-        nulls = con.execute("SELECT count(*) FROM (SELECT * FROM " + scan + ") t WHERE " + " OR ".join(f'"{c}" IS NULL' for c in expected_columns)).fetchone()[0]
-        out.append(ValidationResult("SRC_REQUIRED_NULL", "PASS" if nulls == 0 else "FAIL", name, int(nulls), "required values non-null"))
+    if not schemas_valid:
+        return out
     checks = [
-        ("SRC_CALENDAR_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'calendar_dim')} WHERE geo_region_cd <> 'US' OR cal_wk_day_nbr NOT BETWEEN 1 AND 7 OR cal_mth_nbr NOT BETWEEN 1 AND 12 OR cal_qtr_nbr NOT BETWEEN 1 AND 4 OR wm_week_nbr NOT BETWEEN 1 AND 53 OR wm_yr_wk_nbr <> wm_yr_nbr::INTEGER*100+wm_week_nbr::INTEGER OR fiscal_mth_nbr <> wm_mth_nbr OR fiscal_qtr_nbr <> wm_qtr_nbr OR fiscal_full_yr_nbr <> wm_yr_nbr OR ly_cal_dt <> ly_comp_visit_dt", "calendar_dim"),
-        ("SRC_LOCATION_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'store_dim')} WHERE geo_region_cd <> 'US' OR op_cmpny_cd <> 0 OR NOT isfinite(lat_dgr) OR NOT isfinite(long_dgr) OR lat_dgr NOT BETWEEN -90 AND 90 OR long_dgr NOT BETWEEN -180 AND 180", "store_dim"),
-        ("SRC_PRODUCT_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'omni_item_dimensions')} WHERE op_cmpny_cd < 0 OR wm_item_nbr < 0 OR NOT isfinite(base_unit_rtl_amt) OR base_unit_rtl_amt < 0 OR abs(base_unit_rtl_amt-round(base_unit_rtl_amt,2)) > 0.000001", "omni_item_dimensions"),
-        ("SRC_SALES_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_sales')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR rpt_cd NOT IN (0,7,8) OR svc_chnl_nm <> 'BIS' OR NOT isfinite(ty_sales_amt) OR NOT isfinite(ly_sales_amt) OR abs(ty_sales_amt-round(ty_sales_amt,2)) > 0.000001 OR abs(ly_sales_amt-round(ly_sales_amt,2)) > 0.000001", "store_sales"),
-        ("SRC_INVENTORY_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_invt')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR crncy_cd <> 'USD' OR NOT isfinite(ty_on_hand_rtl_amt) OR NOT isfinite(ly_on_hand_rtl_amt) OR NOT isfinite(curr_store_unit_rtl_amt) OR ty_on_hand_rtl_amt < 0 OR ly_on_hand_rtl_amt < 0 OR curr_store_unit_rtl_amt < 0 OR abs(ty_on_hand_rtl_amt-round(ty_on_hand_rtl_amt,2)) > 0.000001 OR abs(ly_on_hand_rtl_amt-round(ly_on_hand_rtl_amt,2)) > 0.000001 OR abs(curr_store_unit_rtl_amt-round(curr_store_unit_rtl_amt,2)) > 0.000001", "store_invt"),
-        ("SRC_FORECAST_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'long_rng_store_dmd_frcst')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR NOT isfinite(final_fcst_each_qty) OR final_fcst_each_qty < 0 OR fcst_wm_yr_wk_nbr >= wm_yr_wk_nbr OR fcst_wm_yr_wk_nbr%100 NOT BETWEEN 1 AND 53", "long_rng_store_dmd_frcst"),
+        ("SRC_CALENDAR_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'calendar_dim')} WHERE geo_region_cd <> 'US' OR cal_day_nbr NOT BETWEEN 1 AND 31 OR cal_day_nbr <> day(cal_dt) OR cal_wk_day_nbr NOT BETWEEN 1 AND 7 OR cal_mth_nbr NOT BETWEEN 1 AND 12 OR cal_mth_nbr <> month(cal_dt) OR cal_qtr_nbr NOT BETWEEN 1 AND 4 OR cal_qtr_nbr <> quarter(cal_dt) OR cal_full_yr_nbr NOT BETWEEN 1000 AND 9999 OR cal_full_yr_nbr <> year(cal_dt) OR wm_day_nbr NOT BETWEEN 0 AND 65535 OR wm_week_nbr NOT BETWEEN 1 AND 53 OR wm_mth_nbr NOT BETWEEN 1 AND 12 OR wm_qtr_nbr NOT BETWEEN 1 AND 4 OR wm_yr_nbr NOT BETWEEN 1000 AND 9999 OR wm_yr_wk_nbr <> wm_yr_nbr::BIGINT*100+wm_week_nbr OR ly_comp_yr_wk_nbr NOT BETWEEN 100001 AND 999953 OR ly_comp_yr_wk_nbr % 100 NOT BETWEEN 1 AND 53 OR fiscal_mth_nbr <> wm_mth_nbr OR fiscal_qtr_nbr <> wm_qtr_nbr OR fiscal_full_yr_nbr <> wm_yr_nbr OR ly_cal_dt <> ly_comp_visit_dt", "calendar_dim"),
+        ("SRC_LOCATION_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'store_dim')} WHERE store_nbr < 0 OR geo_region_cd <> 'US' OR op_cmpny_cd <> 0 OR NOT isfinite(lat_dgr) OR NOT isfinite(long_dgr) OR lat_dgr NOT BETWEEN -90 AND 90 OR long_dgr NOT BETWEEN -180 AND 180", "store_dim"),
+        ("SRC_PRODUCT_RULES", f"SELECT count(*) FROM {_scan_sql(inventory,'omni_item_dimensions')} WHERE op_cmpny_cd < 0 OR wm_item_nbr < 0 OR NOT isfinite(base_unit_rtl_amt) OR base_unit_rtl_amt < 0 OR round(base_unit_rtl_amt,2) >= 1e18 OR abs(base_unit_rtl_amt-round(base_unit_rtl_amt,2)) > {MONEY_ROUNDING_TOLERANCE}", "omni_item_dimensions"),
+        ("SRC_SALES_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_sales')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR rpt_cd NOT IN (0,7,8) OR svc_chnl_nm <> 'BIS' OR NOT isfinite(ty_sales_amt) OR NOT isfinite(ly_sales_amt) OR abs(round(ty_sales_amt,2)) >= 1e18 OR abs(round(ly_sales_amt,2)) >= 1e18 OR abs(ty_sales_amt-round(ty_sales_amt,2)) > {MONEY_ROUNDING_TOLERANCE} OR abs(ly_sales_amt-round(ly_sales_amt,2)) > {MONEY_ROUNDING_TOLERANCE}", "store_sales"),
+        ("SRC_INVENTORY_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'store_invt')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR crncy_cd <> 'USD' OR NOT isfinite(ty_on_hand_rtl_amt) OR NOT isfinite(ly_on_hand_rtl_amt) OR NOT isfinite(curr_store_unit_rtl_amt) OR ty_on_hand_rtl_amt < 0 OR ly_on_hand_rtl_amt < 0 OR curr_store_unit_rtl_amt < 0 OR round(ty_on_hand_rtl_amt,2) >= 1e18 OR round(ly_on_hand_rtl_amt,2) >= 1e18 OR round(curr_store_unit_rtl_amt,2) >= 1e18 OR abs(ty_on_hand_rtl_amt-round(ty_on_hand_rtl_amt,2)) > {MONEY_ROUNDING_TOLERANCE} OR abs(ly_on_hand_rtl_amt-round(ly_on_hand_rtl_amt,2)) > {MONEY_ROUNDING_TOLERANCE} OR abs(curr_store_unit_rtl_amt-round(curr_store_unit_rtl_amt,2)) > {MONEY_ROUNDING_TOLERANCE}", "store_invt"),
+        ("SRC_FORECAST_DOMAIN", f"SELECT count(*) FROM {_scan_sql(inventory,'long_rng_store_dmd_frcst')} WHERE op_cmpny_cd <> 0 OR geo_region_cd <> 'US' OR NOT isfinite(final_fcst_each_qty) OR final_fcst_each_qty < 0 OR final_fcst_each_qty >= 1e14 OR fcst_wm_yr_wk_nbr >= wm_yr_wk_nbr OR fcst_wm_yr_wk_nbr%100 NOT BETWEEN 1 AND 53", "long_rng_store_dmd_frcst"),
     ]
     for rule, sql, dataset in checks:
         count = con.execute(sql).fetchone()[0]
         out.append(ValidationResult(rule, "PASS" if count == 0 else "FAIL", dataset, int(count), "source semantic contract"))
+    timezone_count = invalid_iana_timezone_row_count(
+        con, _scan_sql(inventory, "store_dim"), "tz_nm"
+    )
+    out.append(
+        ValidationResult(
+            "SRC_TIMEZONE_DOMAIN",
+            "PASS" if timezone_count == 0 else "FAIL",
+            "store_dim",
+            timezone_count,
+            "timezone names belong to the IANA database",
+        )
+    )
+    product_scan = _scan_sql(inventory, "omni_item_dimensions")
+    upc_duplicates = con.execute(
+        f"SELECT count(*)-count(DISTINCT upc_nbr) FROM {product_scan}"
+    ).fetchone()[0]
+    out.append(
+        ValidationResult(
+            "SRC_UPC_UNIQUE",
+            "PASS" if upc_duplicates == 0 else "FAIL",
+            "omni_item_dimensions",
+            int(upc_duplicates),
+            "UPC values unique",
+        )
+    )
     # Cross-dataset references are independently checked, not trusted from producer claims.
     cal, loc, prod = (_scan_sql(inventory, n) for n in ("calendar_dim", "store_dim", "omni_item_dimensions"))
     for name, date_col, week_col in (("store_sales","bus_dt","wm_yr_wk_nbr"),("store_invt","bus_dt","wm_yr_wk_nbr")):
