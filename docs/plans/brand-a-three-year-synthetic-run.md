@@ -17,7 +17,7 @@ MVP:
 - all 2,000 stores in the target reference snapshot;
 - two complete published Walmart merchandising years;
 - cutoff-safe retailer forecasts and explicit PO-line replenishment state;
-- the three Miro extension datasets required by the MVP; and
+- the four Miro extension datasets required by the MVP; and
 - physically separate future/private truth for evaluation.
 
 This is a new content-addressed run. It must not modify, reinterpret, or overwrite the
@@ -261,6 +261,8 @@ Publish a matched extension release containing exactly:
 2. `retailer_replenishment_commitment` — immutable PO-line versions known by the
    release cutoff.
 3. `item_reaction_constraint` — one brand default plus only necessary item overrides.
+4. `company_item_economics` — one effective USD synthetic unit-cost row for every
+   scoped item, sourced from the reviewed economics artifact rather than retail price.
 
 The PO extension uses a bounded retention policy: include every open PO line at the
 cutoff plus completed/cancelled lines with activity in the trailing 56 days. Historical
@@ -417,15 +419,16 @@ PO lifecycle, or release projection logic has a narrow independently testable co
 The four Memento contracts are versioned together for this accepted direction and
 define Miro Toys as all 90 `BRAND_A` items across the 2,000-store target snapshot:
 
-- `docs/product/mvp-product-shape.md` — `miro-oos-product-v1.6.0`
-- `docs/product/mvp-metric-contract.md` — `miro-oos-metrics-v1.6.0`
-- `docs/plans/insights-mvp-data-scope.md` — `miro-oos-data-scope-v1.6.0`
-- `docs/product/memento-glossary.md` — `memento-glossary-v1.3.0`
-- `INSIGHTS_MVP_SYNTHETIC_DATA_BUILDER_HANDOFF.md`
+- `docs/product/mvp-product-shape.md` — `memento-signal-product-v1.0.0`
+- `docs/product/mvp-metric-contract.md` — `memento-signal-metrics-v1.0.0`
+- `docs/plans/insights-mvp-data-scope.md` — `memento-signal-data-scope-v1.0.0`
+- `docs/product/memento-glossary.md` — `memento-glossary-v1.4.0`
+- `docs/handoffs/synthetic-data-memento-signal-v1.md`
 
-The equations and single OOS-prediction capability do not change. Only the configured
-cohort, date coverage, release semantics, and data-builder instructions change. This
-plan and those contract versions control implementation.
+The configured cohort, date coverage, temporal release semantics, and source ownership
+remain unchanged. The current Memento Signal contracts add the reviewed economics input
+and downstream three-signal product without moving calculations into Synthetic Data.
+This plan and those contract versions control source implementation.
 
 ## Acceptance criteria
 

@@ -37,7 +37,7 @@ No secondary insight or interactive scenario-planning capability is part of this
 ```text
 Synthetic Data repository owns:
   immutable observable Walmart releases
-  + three focused Miro extensions
+  + four focused Miro extensions
   + physically separate private evaluator truth
 
 Memento platform owns:
@@ -182,7 +182,7 @@ simulated supply plan.
 
 | Stage | Observable inputs | Memento output |
 |---|---|---|
-| Validate | Manifests, six Walmart schemas, three extensions | accepted release set or failure |
+| Validate | Manifests, six Walmart schemas, four extensions | accepted release set or failure |
 | Forecast | POS, calendar, retailer forecast, inventory eligibility | base forecast, WAPE, low/base/high demand paths |
 | Project | On hand plus deduplicated dated inbound | three deterministic 28-day inventory paths |
 | Predict | Base-path depletion and unfulfilled demand | base OOS date, sensitivity dates, estimated lost units and sales |
@@ -259,7 +259,7 @@ and execution artifacts remain ignored.
 
 - All 90 Miro Spark items and all 2,000 stores resolve deterministically to the checked
   source snapshots.
-- The three extensions are immutable, cutoff-safe, independently validated, and
+- The four extensions are immutable, cutoff-safe, independently validated, and
   sufficient to reproduce the focused fixture cases.
 - Memento can compute every required prediction and ranking field from observable data
   alone.
