@@ -4,7 +4,7 @@
 # Memento base commit: 890d68870f59c5642f37671686ca799cc4613596
 # The Memento working tree was dirty; these content hashes, not the base commit alone,
 # identify the controlling document snapshot.
-1a0f4b48ae12bb914fdf0d1fbb5ee9d827b77eb9e203d75f1355680d45075ffc  docs/handoffs/synthetic-data-memento-signal-v1.md
+fb7623b4e4a2cbbf607b06f4b830310236b4e2e37ea16124304f40926774dc0b  docs/handoffs/synthetic-data-memento-signal-v1.md
 3276d8224471446368fef38352c6759ad0612cc511f6e5a2f70cca2d774924ca  docs/product/mvp-product-shape.md
 7b8d73dbcb3eb77945eaa3297020bad74b2da3c29030b50bf7a0f947715612f7  docs/product/mvp-metric-contract.md
 fe7305bf1a5bf5d2bc92d7a19851e0a448ec9dd6aaf55b5d4ffc41fbb9898f8c  docs/plans/insights-mvp-data-scope.md
